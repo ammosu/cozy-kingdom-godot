@@ -1,0 +1,44 @@
+{
+  "hero": {
+    "model": "fce56f17-7ff4-4fea-b62c-863a885aad53",
+    "rig": "5ea08337-823b-401e-9dc1-faee28c766ae",
+    "rig_kw": {
+      "model_version": "v3.0-20260909",
+      "spec": "unreal"
+    },
+    "anim_idle": "874b351d-f021-4e2e-b28d-2e56ab96bfe4",
+    "anim_walk": "ad699129-758c-4b5b-8753-57e454884940",
+    "anim_run": "c8a446fb-aafa-420a-ab00-f0443df474f8",
+    "anim_jump": "04966f7f-4822-43dc-9137-54b7eea9ad12"
+  },
+  "villager_badger": {
+    "model": "2c832553-8627-4707-b7b7-f582e41539d7",
+    "rig": "f99ca43b-0a1d-4892-a165-0959f3a5db93",
+    "rig_kw": {
+      "model_version": "v3.0-20260909",
+      "spec": "unreal"
+    },
+    "anim_idle": "0d8198a8-bfc1-4b48-ab92-ef12787eb5b3",
+    "anim_walk": "463c73ea-3250-4049-be33-c66c6948c32b"
+  },
+  "villager_heron": {
+    "model": "8dd8d6b8-93b0-49ab-8675-e79ff9bb8ef7",
+    "rig": "2e816e01-5cc7-4362-8f5e-d6f32e69f31e",
+    "rig_kw": {
+      "model_version": "v3.0-20260909",
+      "spec": "unreal"
+    },
+    "anim_idle": "bb6814c9-1282-4a99-95ce-bd5752dea06a",
+    "anim_walk": "5d7413d1-d288-4700-aed4-5050f1124019"
+  },
+  "mount_elk": {
+    "model": "c69fb8ea-f712-455a-9fc0-283cae9d3d75",
+    "rig": "48d548e7-ad51-4bae-9603-c31cf901a36b",
+    "rig_kw": {
+      "model": "v3.0-20260909",
+      "rig_type": "quadruped",
+      "spec": "tripo"
+    },
+    "anim_quadruped:walk": "9b821f8c-452a-4652-9777-8314faa11902"
+  }
+}

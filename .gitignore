@@ -1,0 +1,12 @@
+.env
+.venv/
+assets/raw/
+logs/
+*.blend1
+
+
+
+
+godot/.godot/
+assets/raw/
+shots/dbg.png
