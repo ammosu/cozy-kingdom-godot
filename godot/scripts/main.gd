@@ -76,6 +76,43 @@ func _build_environment() -> void:
 	sun.light_volumetric_fog_energy = 1.2
 	add_child(sun)
 
+# 材質名稱前綴 → [貼圖, 每公尺重複次數, 是否保留 Blender 底色（染色）]
+const TEX := {
+	"Wall_": ["plaster", 0.5, true],
+	"Roof": ["roof_tiles", 0.6, true],
+	"Cobble": ["cobblestone", 0.4, false],
+	"Dirt": ["dirt_path", 0.35, false],
+	"StoneDark": ["stone_wall", 0.4, true],
+	"Stone": ["stone_wall", 0.35, false],
+	"Timber": ["wood_planks", 0.8, true],
+	"Door": ["wood_planks", 0.8, true],
+	"Shutter_": ["wood_planks", 0.8, true],
+	"Grass": ["grass_ground", 0.18, false],
+}
+
+func _apply_texture(m: BaseMaterial3D) -> void:
+	for prefix in TEX:
+		if not m.resource_name.begins_with(prefix):
+			continue
+		var t: Array = TEX[prefix]
+		var path := "res://assets/tex/%s.png" % t[0]
+		if not ResourceLoader.exists(path):
+			return
+		m.albedo_texture = load(path)
+		if not t[2]:
+			m.albedo_color = Color(1, 1, 1)
+		else:
+			# 貼圖本身偏淺，底色稍微提亮避免整體變暗
+			m.albedo_color = m.albedo_color.lightened(0.15)
+		var npath := "res://assets/tex/%s_n.png" % t[0]
+		if ResourceLoader.exists(npath):
+			m.normal_enabled = true
+			m.normal_texture = load(npath)
+			m.normal_scale = 0.8
+		m.uv1_scale = Vector3(t[1], t[1], 1)
+		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+		return
+
 func _tune_kingdom_materials(root: Node) -> void:
 	for n in root.find_children("*", "MeshInstance3D", true, false):
 		var mi := n as MeshInstance3D
@@ -84,6 +121,7 @@ func _tune_kingdom_materials(root: Node) -> void:
 			var m := mi.mesh.surface_get_material(i) as BaseMaterial3D
 			if m == null:
 				continue
+			_apply_texture(m)
 			if m.resource_name == "Window":
 				m.emission_enabled = true
 				m.emission = Color("ffcf7a")
@@ -136,6 +174,7 @@ func _build_grass() -> void:
 	rng.seed = 11
 	var xforms: Array[Transform3D] = []
 	var colors: Array[Color] = []
+	var flowers: Array[Transform3D] = []
 	var target := 700000
 	var radius := 95.0
 	var q := PhysicsRayQueryParameters3D.new()
@@ -156,12 +195,18 @@ func _build_grass() -> void:
 			continue
 		if hit.normal.y < 0.8:
 			continue
-		var h := rng.randf_range(0.22, 0.45) * (1.5 if r > layout.wall_radius + 4.0 else 1.0)
+		var outside: bool = r > layout.wall_radius + 4.0
+		var h := rng.randf_range(0.25, 0.55) if outside else rng.randf_range(0.1, 0.2)   # 城內是修剪過的短草
 		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(0.8, h, 0.8))
 		basis = basis.rotated(Vector3(rng.randf() - 0.5, 0, rng.randf() - 0.5).normalized(), rng.randf_range(0.0, 0.25))
 		xforms.append(Transform3D(basis, hit.position - Vector3(0, 0.02, 0)))
 		var tint := rng.randf_range(0.8, 1.15)
-		colors.append(Color(tint, tint * rng.randf_range(0.95, 1.05), tint * 0.9))
+		if outside:
+			colors.append(Color(tint, tint * rng.randf_range(0.95, 1.05), tint * 0.9))
+		else:
+			colors.append(Color(tint * 1.05, tint * 1.12, tint * 0.85))
+		if rng.randf() < (0.045 if outside else 0.012):
+			flowers.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU), hit.position + Vector3(0, h * rng.randf_range(0.7, 1.1), 0)))
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_colors = true
@@ -175,7 +220,41 @@ func _build_grass() -> void:
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mmi.visibility_range_end = 140.0
 	add_child(mmi)
-	print("grass blades: ", xforms.size())
+	print("grass blades: ", xforms.size(), " flowers: ", flowers.size())
+	_build_flowers(flowers, rng)
+
+func _build_flowers(xs: Array[Transform3D], rng: RandomNumberGenerator) -> void:
+	# 小花：五瓣星形平面＋花心，顏色隨機
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in 5:
+		var a0 := TAU * i / 5.0
+		var a1 := a0 + TAU / 10.0
+		var a2 := a0 - TAU / 10.0
+		for v in [Vector3.ZERO, Vector3(cos(a1), 0, sin(a1)) * 0.035, Vector3(cos(a0), 0, sin(a0)) * 0.075,
+				Vector3.ZERO, Vector3(cos(a0), 0, sin(a0)) * 0.075, Vector3(cos(a2), 0, sin(a2)) * 0.035]:
+			st.set_normal(Vector3.UP)
+			st.add_vertex(v)
+	var mesh := st.commit()
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.roughness = 0.8
+	mesh.surface_set_material(0, m)
+	var palette := [Color("ffffff"), Color("ffe066"), Color("f7a8c4"), Color("b69cf0"), Color("ff9f6b")]
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = mesh
+	mm.instance_count = xs.size()
+	for i in xs.size():
+		mm.set_instance_transform(i, xs[i])
+		mm.set_instance_color(i, palette[rng.randi() % palette.size()])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mmi.visibility_range_end = 90.0
+	add_child(mmi)
 
 # ---------- 角色 ----------
 func _spawn_actors() -> void:
@@ -217,6 +296,7 @@ func _screenshot_mode() -> void:
 	var frames := int(OS.get_environment("FRAMES")) if OS.get_environment("FRAMES") != "" else 90
 	for i in frames:
 		await get_tree().process_frame
+	print("fps ", Engine.get_frames_per_second(), " frames ", frames, " msec ", Time.get_ticks_msec())
 	var img := get_viewport().get_texture().get_image()
 	img.save_png(OS.get_environment("SHOT"))
 	print("saved ", OS.get_environment("SHOT"))

@@ -17,9 +17,28 @@ var elk: Node3D
 var elk_anim: AnimationPlayer
 var mounted := false
 var villagers: Array = []
+var stall_vs: Array = []
 var yaw := 0.0
 var pitch := -0.25
 var vel_y := 0.0
+var demo := OS.get_environment("DEMO") != ""
+var demo_t := 0.0
+var demo_mounted_once := false
+var demo_dismounted := false
+
+# 示範時間軸：[開始秒, 前進量, 側向量, 跑步, 鏡頭 yaw]
+const DEMO_STEPS := [
+	[0.0, 0.0, 0.0, false, 0.0],     # 站著（idle）
+	[1.5, 1.0, 0.0, false, 0.0],     # 走向城門
+	[4.5, 1.0, 0.0, true, 0.0],      # 跑
+	[7.0, 0.0, 0.0, false, 0.0],     # 停、召喚坐騎（7.3 秒）
+	[8.0, 1.0, 0.0, false, 0.0],     # 騎進城
+	[11.0, 0.7, 0.7, false, -0.5],   # 廣場前往右繞，避開噴水池
+	[12.6, 0.0, 0.0, false, -0.5],   # 停、下坐騎（12.9 秒）
+	[13.6, 1.0, -0.2, false, -0.5],  # 走向攤販
+	[15.6, 0.0, 0.0, false, 2.4],    # 停下，鏡頭繞到前面看大家轉頭
+]
+const DEMO_END := 21.0
 
 const WALK_SPEED := 2.4
 const RUN_SPEED := 6.0
@@ -100,7 +119,8 @@ func _make_player() -> void:
 	spring.add_child(camera)
 	if OS.get_environment("SHOT") == "":
 		camera.make_current()
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		if not demo:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _unhandled_input(e: InputEvent) -> void:
@@ -117,8 +137,27 @@ func _physics_process(dt: float) -> void:
 	if player == null:
 		return
 	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
-	var dir := Vector3(input.x, 0, input.y).rotated(Vector3.UP, yaw)
 	var running := Input.is_action_pressed("run")
+	var demo_jump := false
+	if demo:
+		demo_t += dt
+		var step: Array = DEMO_STEPS[0]
+		for st in DEMO_STEPS:
+			if demo_t >= st[0]:
+				step = st
+		input = Vector2(step[2], -step[1])
+		running = step[3]
+		yaw = lerp_angle(yaw, step[4], 1.0 - exp(-1.5 * dt))
+		pitch = -0.22
+		if demo_t > 7.3 and not demo_mounted_once:
+			demo_mounted_once = true
+			_toggle_mount()
+		if demo_t > 12.9 and mounted and not demo_dismounted:
+			demo_dismounted = true
+			_toggle_mount()
+		if demo_t > DEMO_END:
+			get_tree().quit()
+	var dir := Vector3(input.x, 0, input.y).rotated(Vector3.UP, yaw)
 	var speed := MOUNT_SPEED if mounted else (RUN_SPEED if running else WALK_SPEED)
 	player.velocity.x = dir.x * speed
 	player.velocity.z = dir.z * speed
@@ -196,12 +235,20 @@ func _make_villagers() -> void:
 		var plaza := _v(layout.plaza)
 		var out := (s - plaza).normalized()
 		v.global_position = s + out * 1.2
-		v.look_at(plaza * 2.0 - v.global_position, Vector3.UP)  # 面向廣場
-		v.rotate_y(PI)
+		var to_plaza := plaza - v.global_position
+		v.rotation.y = atan2(to_plaza.x, to_plaza.z)  # 面向廣場（模型正面是 +Z）
+		stall_vs.append({"node": v, "base": v.rotation.y})
 
 
 func _update_villagers(dt: float) -> void:
 	var pp := player.global_position
+	for d in stall_vs:
+		var n: Node3D = d.node
+		var target: float = d.base
+		if n.global_position.distance_to(pp) < 6.0:
+			var to := pp - n.global_position
+			target = atan2(to.x, to.z)
+		n.rotation.y = lerp_angle(n.rotation.y, target, 1.0 - exp(-4.0 * dt))
 	for d in villagers:
 		var n: Node3D = d.node
 		var near := n.global_position.distance_to(pp) < 4.0

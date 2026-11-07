@@ -74,6 +74,7 @@ CLOTH_COLORS = ["#e9c46a", "#e76f51", "#2a9d8f", "#f4a3a8", "#ffffff", "#8ab6d6"
 class Bucket:
     def __init__(self, name):
         self.name, self.bm, self.mats = name, bmesh.new(), []
+        self.uv = self.bm.loops.layers.uv.new("UVMap")
 
     def mi(self, m):
         if m not in self.mats:
@@ -86,9 +87,25 @@ class Bucket:
         for f in faces:
             try:
                 face = self.bm.faces.new([vs[i] for i in f])
-                face.material_index = idx
             except ValueError:
-                pass
+                continue
+            face.material_index = idx
+            # UV（單位：公尺）：近水平面用 xy；其餘用「水平切線 × 沿坡向上」，牆與屋頂斜面都對齊自己的方向
+            pts = [Vector(verts[i]) for i in f]
+            n = (pts[1] - pts[0]).cross(pts[2] - pts[0])
+            if n.length < 1e-9 and len(pts) > 3:
+                n = (pts[2] - pts[0]).cross(pts[3] - pts[0])
+            n = n.normalized() if n.length > 1e-9 else Vector((0, 0, 1))
+            if abs(n.z) > 0.97:
+                proj = lambda p: (p.x, p.y)
+            else:
+                t = Vector((-n.y, n.x, 0)).normalized()
+                b = n.cross(t)
+                if b.z < 0:
+                    b = -b
+                proj = lambda p, t=t, b=b: (p.dot(t), p.dot(b))
+            for loop in face.loops:
+                loop[self.uv].uv = proj(loop.vert.co)
 
     def obj(self, recalc=True):
         me = bpy.data.meshes.new(self.name)
@@ -346,7 +363,8 @@ def house_designs(n=26):
             wall=r.choice(WALL_COLORS), roof=r.choice(ROOF_COLORS),
             style=r.choice(["gable", "gable", "hip"]), timber=r.random() < 0.6,
             jetty=r.random() < 0.4, chimney=r.random() < 0.6, roof_h=r.uniform(2.2, 3.6),
-            window_boxes=r.random() < 0.5))
+            window_boxes=r.random() < 0.5, shutters=r.random() < 0.5,
+            shutter_color=r.choice(["#3d6e8f", "#5c8a4f", "#8f3d3d", "#d9a441"]), sign=r.random() < 0.25))
     return ds
 
 
@@ -362,22 +380,46 @@ def build_house(walls, roofs, trim, p, rot, ds):
         grow = 0.35 if (ds["jetty"] and f > 0) else 0.0
         ww, dd = w + grow * 2, d + grow * 2
         box(walls, L(0, 0, z), (ww, dd, fh), mw, rot)
-        if ds["timber"] and f > 0 or (ds["timber"] and ds["floors"] == 1):
-            for x in [-ww / 2 + 0.05 + i * (ww - 0.1) / 3 for i in range(4)]:
-                box(trim, L(x, -dd / 2 - 0.03, z), (0.18, 0.08, fh), M["timber"], rot)
-            box(trim, L(0, -dd / 2 - 0.03, z + fh - 0.18), (ww, 0.09, 0.18), M["timber"], rot)
-            box(trim, L(0, -dd / 2 - 0.03, z), (ww, 0.09, 0.18), M["timber"], rot)
-        # 窗（正面 y=-d/2 朝街）
-        nwin = max(1, int(ww // 2.4))
-        for i in range(nwin):
-            x = -ww / 2 + (i + 0.5) * ww / nwin
-            if f == 0 and i == nwin // 2:
-                box(trim, L(x, -dd / 2 - 0.06, z), (1.1, 0.12, 2.0), M["door"], rot)
-                continue
-            box(trim, L(x, -dd / 2 - 0.06, z + 0.9), (0.8, 0.1, 1.1), M["window"], rot)
-            box(trim, L(x, -dd / 2 - 0.12, z + 0.8), (1.0, 0.12, 0.1), M["timber"], rot)
-            if ds["window_boxes"] and f > 0:
-                box(trim, L(x, -dd / 2 - 0.3, z + 0.65), (0.95, 0.35, 0.25), mat("Flowers", srgb("#d9506b"), 0.9), rot)
+        if ds["timber"] and (f > 0 or ds["floors"] == 1):
+            for face_rot, half_w, half_d in ((0, ww, dd), (math.pi, ww, dd), (math.pi / 2, dd, ww), (-math.pi / 2, dd, ww)):
+                cs2, sn2 = math.cos(face_rot), math.sin(face_rot)
+                F = lambda x, y, zz, cs2=cs2, sn2=sn2: L(x * cs2 - y * sn2, x * sn2 + y * cs2, zz)
+                for x in [-half_w / 2 + 0.06 + i * (half_w - 0.12) / 3 for i in range(4)]:
+                    box(trim, F(x, -half_d / 2 - 0.03, z), (0.18, 0.08, fh), M["timber"], rot + face_rot)
+                box(trim, F(0, -half_d / 2 - 0.03, z + fh - 0.18), (half_w, 0.09, 0.18), M["timber"], rot + face_rot)
+                box(trim, F(0, -half_d / 2 - 0.03, z), (half_w, 0.09, 0.18), M["timber"], rot + face_rot)
+        # 窗：四面都開（正面最多、側面背面少一點）；門只在正面一樓
+        for face_rot, fw, fd, front in ((0, ww, dd, True), (math.pi, ww, dd, False), (math.pi / 2, dd, ww, False), (-math.pi / 2, dd, ww, False)):
+            cs2, sn2 = math.cos(face_rot), math.sin(face_rot)
+            F = lambda x, y, zz, cs2=cs2, sn2=sn2: L(x * cs2 - y * sn2, x * sn2 + y * cs2, zz)
+            R = rot + face_rot
+            nwin = max(1, int(fw // 2.4)) if front else int(fw // 3.2)
+            for i in range(nwin):
+                x = -fw / 2 + (i + 0.5) * fw / nwin
+                if front and f == 0 and i == nwin // 2:
+                    box(trim, F(x, -fd / 2 - 0.04, z), (1.1, 0.12, 2.0), M["door"], R)
+                    box(trim, F(x, -fd / 2 - 0.1, z + 2.0), (1.5, 0.2, 0.18), M["timber"], R)     # 門楣
+                    for sx in (-0.65, 0.65):
+                        box(trim, F(x + sx, -fd / 2 - 0.1, z), (0.16, 0.2, 2.0), M["timber"], R)
+                    box(walls, F(x, -fd / 2 - 0.45, 0.0), (1.6, 0.7, 0.5), M["stone_dark"], R)    # 台階
+                    if ds["sign"]:
+                        box(trim, F(x + 1.0, -fd / 2 - 0.55, z + 2.35), (0.06, 0.9, 0.06), M["timber"], R)
+                        box(trim, F(x + 1.0, -fd / 2 - 0.85, z + 1.75), (0.05, 0.6, 0.5), mat("Sign", srgb("#e9c46a"), 0.7), R)
+                    continue
+                y0 = -fd / 2
+                box(trim, F(x, y0 - 0.02, z + 0.9), (0.8, 0.1, 1.1), M["window"], R)
+                box(trim, F(x, y0 - 0.12, z + 0.8), (1.1, 0.2, 0.1), M["timber"], R)       # 窗台
+                box(trim, F(x, y0 - 0.08, z + 1.98), (1.04, 0.14, 0.12), M["timber"], R)   # 上框
+                for sx in (-0.46, 0.46):
+                    box(trim, F(x + sx, y0 - 0.08, z + 0.9), (0.1, 0.14, 1.1), M["timber"], R)  # 側框
+                box(trim, F(x, y0 - 0.07, z + 0.9), (0.06, 0.1, 1.1), M["timber"], R)       # 窗格
+                box(trim, F(x, y0 - 0.07, z + 1.42), (0.8, 0.1, 0.06), M["timber"], R)
+                if ds["shutters"]:
+                    ms = mat("Shutter_" + ds["shutter_color"], srgb(ds["shutter_color"]), 0.8)
+                    for sx in (-0.82, 0.82):
+                        box(trim, F(x + sx, y0 - 0.09, z + 0.88), (0.5, 0.06, 1.14), ms, R)
+                if ds["window_boxes"] and f > 0 and front:
+                    box(trim, F(x, y0 - 0.3, z + 0.65), (0.95, 0.35, 0.25), mat("Flowers", srgb("#d9506b"), 0.9), R)
         z += fh
     top_w = w + (0.7 if ds["jetty"] and ds["floors"] > 1 else 0)
     top_d = d + (0.7 if ds["jetty"] and ds["floors"] > 1 else 0)
