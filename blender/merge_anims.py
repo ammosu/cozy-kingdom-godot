@@ -1,7 +1,9 @@
 """Tripo 輸出（rigged.glb＋每個動作一個 glb）→ 合併成單一 glb、所有動作都在同一個骨架上。
 刪掉 Tripo 匯出夾帶的 Icosphere，量模型高度、把腳底放到原點、縮放到目標身高。
 
-blender -b -P blender/merge_anims.py -- <角色> <目標身高m>
+blender -b -P blender/merge_anims.py -- <角色> <目標身高m> [轉向角度]
+轉向角度：Tripo 的 spec="unreal" 雙足骨架面向 +X（UE 慣例），要給 -90 轉成 glTF 正面 +Z；
+四足 spec="tripo" 本來就面向 +Z，給 0（預設）。
 輸出 godot/assets/chars/<角色>.glb
 """
 import bpy, sys
@@ -9,8 +11,10 @@ from mathutils import Vector
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-name, height = sys.argv[sys.argv.index("--") + 1:][:2]
-height = float(height)
+import math
+args = sys.argv[sys.argv.index("--") + 1:]
+name, height = args[0], float(args[1])
+yaw = float(args[2]) if len(args) > 2 else 0.0
 src = ROOT / "assets" / "glb" / name
 bpy.ops.wm.read_factory_settings(use_empty=True)
 
@@ -49,6 +53,9 @@ for f in sorted(src.glob("*.glb")):
             bpy.data.objects.remove(o)
     print("added action", f.stem, act.frame_range[:])
 
+# 轉成正面朝 glTF +Z（Blender -Y）
+arm.rotation_mode = "XYZ"
+arm.rotation_euler.z += math.radians(yaw)
 # 量高度（rest pose）、腳底對齊
 bpy.context.view_layer.update()
 lo, hi = Vector((1e9,) * 3), Vector((-1e9,) * 3)
