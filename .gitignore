@@ -11,3 +11,10 @@ godot/.godot/
 assets/raw/
 shots/dbg.png
 video/
+
+# Hunyuan 中間產物（成品複製在 godot/assets/props）
+assets3d/*/paint/
+assets3d/*/*.glb
+assets3d/*/ref_*.png
+assets3d/*/codex.log
+assets3d/*/paint.log

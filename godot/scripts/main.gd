@@ -2,7 +2,8 @@ extends Node3D
 ## 世界組裝：載入 Blender 生成的王國、天空與光、草地、角色。
 ## 截圖模式（環境變數）：SHOT=<輸出路徑> CAM=x,y,z LOOK=x,y,z [FRAMES=90] [TIME=秒]
 
-const LAYOUT_PATH := "res://assets/kingdom_layout.json"
+# 預設載入 Hunyuan 版（kingdom_hy：建築改由 props.gd 擺生成模型）；KINGDOM=proc 切回全程序化版本
+var HY := OS.get_environment("KINGDOM") != "proc" and ResourceLoader.exists("res://assets/kingdom_hy.glb")
 var layout: Dictionary
 var sun: DirectionalLight3D
 var env: Environment
@@ -10,11 +11,16 @@ var grass_mat: ShaderMaterial
 var nature: Node3D
 
 func _ready() -> void:
-	layout = JSON.parse_string(FileAccess.get_file_as_string(LAYOUT_PATH))
+	layout = JSON.parse_string(FileAccess.get_file_as_string("res://assets/kingdom%s_layout.json" % ("_hy" if HY else "")))
 	_build_environment()
-	var kingdom: Node3D = load("res://assets/kingdom.glb").instantiate()
+	var kingdom: Node3D = load("res://assets/kingdom%s.glb" % ("_hy" if HY else "")).instantiate()
 	add_child(kingdom)
 	_tune_kingdom_materials(kingdom)
+	var props: Node3D = load("res://scripts/props.gd").new()
+	props.name = "Props"
+	add_child(props)
+	await get_tree().physics_frame
+	props.setup(layout, HY)   # 生成模型的碰撞要在種草之前建好，草才會避開
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	if OS.get_environment("OLD_GRASS") != "":
@@ -125,7 +131,7 @@ func _tune_kingdom_materials(root: Node) -> void:
 	for n in root.find_children("*", "MeshInstance3D", true, false):
 		var mi := n as MeshInstance3D
 		mi.gi_mode = GeometryInstance3D.GI_MODE_STATIC
-		if String(mi.name).begins_with("Tree"):
+		if String(mi.name).begins_with("Tree") or String(mi.name).begins_with("HiddenCol"):
 			mi.visible = false   # 舊的圓錐樹只留碰撞；樹改由 nature.gd 種
 			continue
 		for i in mi.mesh.get_surface_count():

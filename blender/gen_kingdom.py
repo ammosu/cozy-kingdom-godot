@@ -1,6 +1,9 @@
 """程序化生成城牆王國 → godot/assets/kingdom.glb ＋ godot/assets/kingdom_layout.json
 
-blender -b -P blender/gen_kingdom.py -- [--seed 7] [--houses 70]
+blender -b -P blender/gen_kingdom.py -- [--seed 7] [--houses 70] [--hy 1]
+
+--hy 1：房子、攤位、噴水池、塔樓、城門樓、主堡改由 Hunyuan3D 生成的模型擺放（Godot 的 props.gd），
+這裡只留城牆牆身、地形、道路、樹的碰撞，位置與尺寸照樣寫進 layout；輸出 kingdom_hy.glb／kingdom_hy_layout.json。
 
 座標：Blender Z 向上、單位公尺；glTF 匯出後在 Godot 是 Y 向上（Blender (x, y, z) → Godot (x, z, -y)）。
 物件名稱帶 -col 的，Godot 匯入時自動產生 trimesh 碰撞。
@@ -14,6 +17,7 @@ argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 opt = {argv[i].lstrip("-"): argv[i + 1] for i in range(0, len(argv) - 1, 2)}
 SEED = int(opt.get("seed", 7))
 N_HOUSES = int(opt.get("houses", 70))
+HY = opt.get("hy", "0") == "1"
 rng = random.Random(SEED)
 
 WALL_R = 58.0        # 城牆半徑
@@ -277,8 +281,11 @@ def nearest_road_dir(p):
 
 
 # ---------- 城牆、塔、城門 ----------
+WALL_SEGS = []   # hy 模式：每段牆的起訖點（Blender 座標），給 Godot 擺生成的牆段
+
+
 def build_walls():
-    b = Bucket("Walls-col")
+    b = Bucket("HiddenColWalls-col" if HY else "Walls-col")   # hy：只留碰撞，外觀由生成的牆段負責
     roofs = Bucket("TowerRoofs")
     verts = [Vector((WALL_R * math.cos(GATE_ANGLE + 2 * math.pi * i / WALL_SEG),
                      WALL_R * math.sin(GATE_ANGLE + 2 * math.pi * i / WALL_SEG), 0)) for i in range(WALL_SEG)]
@@ -299,6 +306,9 @@ def build_walls():
         seg_a, seg_c = a + dirn * start, a + dirn * end
         mid = (seg_a + seg_c) / 2
         box(b, (mid.x, mid.y, 0), ((seg_c - seg_a).length, 2.4, WALL_H), M["stone"], rot)
+        WALL_SEGS.append((seg_a.copy(), seg_c.copy()))
+        if HY:
+            continue
         # 城垛
         k = int((seg_c - seg_a).length / 1.6)
         nrm = Vector((-dirn.y, dirn.x, 0))
@@ -310,7 +320,7 @@ def build_walls():
                 q = p + nrm * side * 1.0
                 box(b, (q.x, q.y, WALL_H), (0.8, 0.4, 0.8), M["stone"], rot)
     for i, v in enumerate(verts):
-        if i == 0:
+        if i == 0 or HY:
             continue
         cyl(b, (v.x, v.y, 0), 3.4, WALL_H + 4, M["stone"], n=14)
         cyl(b, (v.x, v.y, WALL_H + 4), 3.8, 0.6, M["stone_dark"], n=14)
@@ -319,6 +329,12 @@ def build_walls():
     g = verts[0]
     tang = math.atan2(math.cos(GATE_ANGLE), -math.sin(GATE_ANGLE))  # 牆切線方向
     tx, ty = math.cos(tang), math.sin(tang)
+    if HY:   # 生成的城門樓用三角網格碰撞會把門洞堵住 → 只留兩座塔的方塊碰撞（Godot 端隱藏）
+        hc = Bucket("HiddenCol-col")
+        for side in (-1, 1):
+            box(hc, (g.x + tx * side * 5.5, g.y + ty * side * 5.5, 0), (4, 6, WALL_H + 5), M["stone"], tang)
+        hc.obj()
+        return b.obj(), roofs.obj(), [list(v) for v in verts]
     for side in (-1, 1):
         p = (g.x + tx * side * 5.5, g.y + ty * side * 5.5, 0)
         box(b, p, (4, 6, WALL_H + 5), M["stone"], tang)
@@ -469,11 +485,12 @@ def place_houses():
             continue
         fwd = -nrm                                   # 正面朝向這條路
         rot = math.atan2(fwd.y, fwd.x) + math.pi / 2
-        top = build_house(walls, roofs, trim, p, rot, dsn)
+        top = 0.5 + dsn["floors"] * dsn["fh"] + dsn["roof_h"] if HY else build_house(walls, roofs, trim, p, rot, dsn)
         placed.append((p, rad))
-        layout.append(dict(pos=[p.x, p.y], rot=rot, design=di, top=top, door=[p.x + fwd.x * (dsn["d"] / 2 + 1.0), p.y + fwd.y * (dsn["d"] / 2 + 1.0)]))
+        layout.append(dict(pos=[p.x, p.y], rot=rot, design=di, top=top, w=dsn["w"], d=dsn["d"], floors=dsn["floors"], front=[fwd.x, fwd.y], door=[p.x + fwd.x * (dsn["d"] / 2 + 1.0), p.y + fwd.y * (dsn["d"] / 2 + 1.0)]))
     print(f"houses placed {len(placed)} (tries {tries}), designs used {len({h['design'] for h in layout})}")
-    walls.obj(); roofs.obj(); trim.obj()
+    if not HY:
+        walls.obj(); roofs.obj(); trim.obj()
     return layout, placed
 
 
@@ -485,6 +502,9 @@ def build_market():
         a = 2 * math.pi * i / 8 + 0.2
         p = PLAZA + Vector((math.cos(a), math.sin(a), 0)) * (PLAZA_R - 4)
         rot = a + math.pi / 2
+        if HY:
+            stalls.append(dict(pos=[p.x, p.y], rot=rot))
+            continue
         cs, sn = math.cos(rot), math.sin(rot)
         L = lambda x, y, z=0: (p.x + x * cs - y * sn, p.y + x * sn + y * cs, z)
         box(b, L(0, 0), (2.8, 1.4, 0.95), M["timber"], rot)  # 櫃台
@@ -499,6 +519,8 @@ def build_market():
         for x in (-0.8, 0, 0.8):
             cyl(b, L(x, 0, 0.95), 0.28, 0.2, mat("Produce_" + str(i), srgb(rng.choice(["#e05d44", "#f2b84b", "#8cc152", "#d97ab0"])), 0.7), n=8)
         stalls.append(dict(pos=[p.x, p.y], rot=rot))
+    if HY:
+        return stalls
     # 噴水池
     cyl(b, (PLAZA.x, PLAZA.y, 0), 3.2, 0.7, M["stone"], n=20)
     cyl(b, (PLAZA.x, PLAZA.y, 0.6), 2.8, 0.05, M["water"], n=20)
@@ -562,10 +584,12 @@ def build_trees():
 build_terrain()
 _, gate = build_roads()
 _, _, wall_verts = build_walls()
-build_keep()
+if not HY:
+    build_keep()
 houses_layout, houses_placed = place_houses()
 stalls = build_market()
-build_laundry(houses_placed)
+if not HY:
+    build_laundry(houses_placed)
 trees = build_trees()
 
 for ob in scene.objects:   # 平滑著色關掉，保留低多邊形硬邊；地形例外（平滑起伏）
@@ -577,8 +601,9 @@ for ob in scene.objects:   # 平滑著色關掉，保留低多邊形硬邊；地
 
 out_dir = ROOT / "godot" / "assets"
 out_dir.mkdir(parents=True, exist_ok=True)
-bpy.ops.wm.save_as_mainfile(filepath=str(ROOT / "blender" / "kingdom.blend"))
-bpy.ops.export_scene.gltf(filepath=str(out_dir / "kingdom.glb"), export_format="GLB", export_apply=True, export_yup=True)
+SUF = "_hy" if HY else ""
+bpy.ops.wm.save_as_mainfile(filepath=str(ROOT / "blender" / f"kingdom{SUF}.blend"))
+bpy.ops.export_scene.gltf(filepath=str(out_dir / f"kingdom{SUF}.glb"), export_format="GLB", export_apply=True, export_yup=True)
 
 to_godot = lambda x, y, z=0.0: [round(x, 3), round(z, 3), round(-y, 3)]
 layout = dict(
@@ -586,11 +611,18 @@ layout = dict(
     gate=to_godot(gate.x, gate.y), plaza=to_godot(PLAZA.x, PLAZA.y), plaza_radius=PLAZA_R,
     keep=to_godot(KEEP.x, KEEP.y), keep_door=to_godot(KEEP.x, KEEP.y - 9),
     spawn=to_godot(gate.x * 1.25, gate.y * 1.25),
-    houses=[dict(pos=to_godot(*h["pos"]), door=to_godot(*h["door"]), design=h["design"]) for h in houses_layout],
+    # yaw：Godot 繞 Y 軸角度（度），模型正面（+Z）轉到這個角度就朝向道路
+    houses=[dict(pos=to_godot(*h["pos"]), door=to_godot(*h["door"]), design=h["design"], w=h["w"], d=h["d"],
+                 floors=h["floors"], top=round(h["top"], 2),
+                 yaw=round(math.degrees(math.atan2(h["front"][0], -h["front"][1])), 1)) for h in houses_layout],
+    towers=[to_godot(v[0], v[1]) for v in wall_verts[1:]],
+    gatehouse=to_godot(wall_verts[0][0], wall_verts[0][1]),
+    wall_segs=[[to_godot(a.x, a.y), to_godot(c.x, c.y)] for a, c in WALL_SEGS],
+    wall_h=WALL_H,
     stalls=[to_godot(*s["pos"]) for s in stalls],
     roads=[dict(a=to_godot(a.x, a.y), b=to_godot(c.x, c.y), w=w) for a, c, w in ROADS],
     trees=[to_godot(x, y, ground_h(x, y)) for x, y, _ in trees],
 )
-(out_dir / "kingdom_layout.json").write_text(json.dumps(layout, ensure_ascii=False))
+(out_dir / f"kingdom{SUF}_layout.json").write_text(json.dumps(layout, ensure_ascii=False))
 tri = sum(sum(len(p.vertices) - 2 for p in ob.data.polygons) for ob in scene.objects)
-print(f"exported {out_dir / 'kingdom.glb'}  objects={len(scene.objects)} tris={tri}")
+print(f"exported {out_dir / f'kingdom{SUF}.glb'}  objects={len(scene.objects)} tris={tri}")

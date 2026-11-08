@@ -15,6 +15,12 @@
    - `blender -b -P blender/gen_trees.py` → `godot/assets/nature/*.glb`（闊葉樹、松樹、灌木）。
    - `tools/codex_sprites.sh` 用 Codex 生透明植物圖（清單在 `textures/sprites/list.tsv`），再跑 `python3 tools/prep_sprites.py` 做裁邊、顏色外擴，輸出到 `godot/assets/sprites/`。
    - 種植寫在 `godot/scripts/nature.gd`。設 `OLD_GRASS=1` 可切回舊的單片草葉。
+5c. **Hunyuan3D 建築與道具**（取代程序化的房子、攤位、噴水池、塔樓、城門、主堡、城牆）：
+   - 清單在 `assets3d/list.tsv`（名稱＋英文描述）。
+   - `tools/codex_sheet.sh <名稱>...`：Codex 畫四視角透明設計圖，切成 `assets3d/<名稱>/{front,left,back,right}.png`。
+   - `tools/hy_asset.sh <名稱>...`：Hunyuan 2.0 MV 出形狀（ComfyUI 要開著）→ `blender/prep_untextured.py` 減面到 3 萬面 → Hunyuan 2.1 Paint 用四張圖上色 → `assets3d/<名稱>/<名稱>.glb`。每個約 2 分鐘。可加 `SHAPE_ONLY=1`、`PAINT_ONLY=1`、`SEED=`。
+   - 成品複製到 `godot/assets/props/`。`blender -b -P blender/gen_kingdom.py -- --seed 7 --houses 120 --hy 1` 產生不含這些建築的 `kingdom_hy.glb`，由 `props.gd` 依配置擺放。設 `KINGDOM=proc` 可切回程序化版。
+   - **授權**：Hunyuan3D 2.1 Paint 模型限非商業用途。
 6. **截圖**：`[REL=1] tools/shot.sh <名稱> "x,y,z" "x,y,z" [frames]`
    - `REL=1` 時 y 代表離地高度。
 7. **示範影片**：`tools/record.sh <名稱>` → `video/<名稱>.mp4`
@@ -35,4 +41,8 @@
 - **錄影節流**：Godot 視窗在背景時，vsync 會被合成器節流到約 1 fps。`project.godot` 要設 `vsync_mode=0`，錄 21 秒的影片才只要 34 秒。
 - **植被不像遊戲**：hd2d／beach3d 的經驗是樹冠用平滑圓球會有團塊感，要在表面貼葉簇卡片（每團約 34 張）。草和花用透明貼圖的交叉面片，法線一律朝上，背面才不會變黑。Codex 的 prompt 要明寫「背景必須是真正透明的 alpha，不要白底、不要棋盤格」，這次 8 張全部一次成功。
 - **截圖的 fps**：前 120 幀還在編譯 shader、算 SDFGI，數字不準，量效能要給 900 幀（shot.sh 第 4 個參數）。
+- **Hunyuan 破碎網格**：有些房子的原始網格有兩、三百萬面、幾十萬條非流形邊，直接減面會卡在 70 萬面，Paint 一跑十幾分鐘到兩小時。`prep_untextured.py` 遇到超過目標 40 倍的網格會先做體素重建再減面。
+- **扁長物件細節糊掉**：10 m 長的城牆，城垛在 Hunyuan 裡解析度不夠，糊成一團。模組化的物件要做短一點、接近正方形。
+- **隱藏碰撞擋到貼地射線**：城牆用 Blender 的隱藏方塊做碰撞，擺牆段時往下打的射線要跳過 `HiddenCol*`，不然整段牆會浮在 7 m 高。
+- **zsh 不拆變數**：`for n in $names` 在 zsh 只跑一次，批次腳本要用 bash 跑。
 - **相關筆記**：beach3d-eval 的 `PLAYBOOK.md` 有 Tripo 與 Blender 的其他筆記。
