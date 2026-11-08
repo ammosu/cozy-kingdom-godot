@@ -7,6 +7,7 @@ var layout: Dictionary
 var sun: DirectionalLight3D
 var env: Environment
 var grass_mat: ShaderMaterial
+var nature: Node3D
 
 func _ready() -> void:
 	layout = JSON.parse_string(FileAccess.get_file_as_string(LAYOUT_PATH))
@@ -16,7 +17,14 @@ func _ready() -> void:
 	_tune_kingdom_materials(kingdom)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
-	_build_grass()
+	if OS.get_environment("OLD_GRASS") != "":
+		_build_grass()
+	nature = load("res://scripts/nature.gd").new()
+	nature.name = "Nature"
+	add_child(nature)
+	nature.setup(layout)
+	if OS.get_environment("OLD_GRASS") == "":
+		nature.plant_ground_cover(self)
 	_spawn_actors()
 	if OS.get_environment("SHOT") != "":
 		_screenshot_mode()
@@ -117,11 +125,16 @@ func _tune_kingdom_materials(root: Node) -> void:
 	for n in root.find_children("*", "MeshInstance3D", true, false):
 		var mi := n as MeshInstance3D
 		mi.gi_mode = GeometryInstance3D.GI_MODE_STATIC
+		if String(mi.name).begins_with("Tree"):
+			mi.visible = false   # 舊的圓錐樹只留碰撞；樹改由 nature.gd 種
+			continue
 		for i in mi.mesh.get_surface_count():
 			var m := mi.mesh.surface_get_material(i) as BaseMaterial3D
 			if m == null:
 				continue
 			_apply_texture(m)
+			if m.resource_name.begins_with("Grass"):
+				m.albedo_color = Color(0.62, 0.78, 0.5)   # 地面壓暗偏草根色，草叢之間的空隙才不會一塊塊發亮
 			if m.resource_name == "Window":
 				m.emission_enabled = true
 				m.emission = Color("ffcf7a")
@@ -280,7 +293,9 @@ func _ground(p: Vector3) -> float:
 func _screenshot_mode() -> void:
 	var t := OS.get_environment("TIME")
 	if t != "":
-		grass_mat.set_shader_parameter("time_override", float(t))
+		if grass_mat:
+			grass_mat.set_shader_parameter("time_override", float(t))
+		nature.set_time(float(t))
 	var cam := Camera3D.new()
 	cam.fov = 55
 	cam.far = 1200

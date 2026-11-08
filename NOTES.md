@@ -11,6 +11,10 @@
 3. **合併動作**：`blender -b -P blender/merge_anims.py -- <角色> <身高m> [轉向角度]`（雙足給 -90、四足給 0） → `godot/assets/chars/<角色>.glb`
 4. **王國**：`blender -b -P blender/gen_kingdom.py -- --seed 7 --houses 120` → `godot/assets/kingdom.glb`＋`kingdom_layout.json`
 5. **材質**：Codex 生成 `textures/src/*.png`，再跑 `python3 tools/prep_textures.py`（無縫化、法線貼圖、可染色的貼圖去飽和）。
+5b. **植被**：
+   - `blender -b -P blender/gen_trees.py` → `godot/assets/nature/*.glb`（闊葉樹、松樹、灌木）。
+   - `tools/codex_sprites.sh` 用 Codex 生透明植物圖（清單在 `textures/sprites/list.tsv`），再跑 `python3 tools/prep_sprites.py` 做裁邊、顏色外擴，輸出到 `godot/assets/sprites/`。
+   - 種植寫在 `godot/scripts/nature.gd`。設 `OLD_GRASS=1` 可切回舊的單片草葉。
 6. **截圖**：`[REL=1] tools/shot.sh <名稱> "x,y,z" "x,y,z" [frames]`
    - `REL=1` 時 y 代表離地高度。
 7. **示範影片**：`tools/record.sh <名稱>` → `video/<名稱>.mp4`
@@ -29,4 +33,6 @@
 - **Tripo 角色朝向**：`spec="unreal"` 的雙足骨架面向 +X（UE 慣例），四足 `spec="tripo"` 面向 +Z。雙足要在合併時轉 -90°，不然走路會側著走。用 Workbench 從 +Z 方向算一張正視圖就能檢查。
 - **城門大道**：城外地形隆起會把延伸出去的路埋掉，要整平一條走廊。
 - **錄影節流**：Godot 視窗在背景時，vsync 會被合成器節流到約 1 fps。`project.godot` 要設 `vsync_mode=0`，錄 21 秒的影片才只要 34 秒。
+- **植被不像遊戲**：hd2d／beach3d 的經驗是樹冠用平滑圓球會有團塊感，要在表面貼葉簇卡片（每團約 34 張）。草和花用透明貼圖的交叉面片，法線一律朝上，背面才不會變黑。Codex 的 prompt 要明寫「背景必須是真正透明的 alpha，不要白底、不要棋盤格」，這次 8 張全部一次成功。
+- **截圖的 fps**：前 120 幀還在編譯 shader、算 SDFGI，數字不準，量效能要給 900 幀（shot.sh 第 4 個參數）。
 - **相關筆記**：beach3d-eval 的 `PLAYBOOK.md` 有 Tripo 與 Blender 的其他筆記。
