@@ -16,6 +16,9 @@ const HOUSES := [
 	["ck_inn", 8.0, 6.0, 3, 2],
 	["ck_smithy", 7.0, 5.5, 2, 2],
 ]
+# 城牆模型與一節的長度（ck_wall2 高約 7.8 m 時不變形的長度約 6 m；舊版 ck_wall 用 10 m）
+const WALL_PIECE := "ck_wall2"
+const WALL_PIECE_LEN := 6.0
 const STALLS := ["ck_stall", "ck_stall_b", "ck_stall_c"]
 
 var space: PhysicsDirectSpaceState3D
@@ -56,16 +59,16 @@ func _place_kingdom(L: Dictionary) -> void:
 		var p := Vector2(L.stalls[i][0], L.stalls[i][2])
 		place(STALLS[i % STALLS.size()], p, _yaw_to(p, plaza), {"height": 3.0})
 	place("ck_fountain", plaza, 0.0, {"fit": [6.6, 6.6]})
-	# 城牆：每段切成約 10 m 一節，正面朝外；節與節略重疊蓋住接縫，轉角由塔樓蓋住。碰撞用 Blender 的隱藏方塊
+	# 城牆：每段切成約 WALL_PIECE_LEN 一節，正面朝外；節與節略重疊蓋住接縫，轉角由塔樓蓋住。碰撞用 Blender 的隱藏方塊
 	var wh: float = L.get("wall_h", 7.0)
 	for seg in L.get("wall_segs", []):
 		var a := Vector2(seg[0][0], seg[0][2])
 		var b := Vector2(seg[1][0], seg[1][2])
-		var n := maxi(1, roundi(a.distance_to(b) / 10.0))
+		var n := maxi(1, roundi(a.distance_to(b) / WALL_PIECE_LEN))
 		var piece := a.distance_to(b) / n
 		for k in n:
 			var p := a.lerp(b, (k + 0.5) / n)
-			place("ck_wall", p, rad_to_deg(atan2(p.x, p.y)), {"box": [piece + 0.5, wh + 0.8, 2.6], "collide": false})
+			place(WALL_PIECE, p, rad_to_deg(atan2(p.x, p.y)), {"box": [piece + 0.5, wh + 0.8, 2.6], "collide": false})
 	# 城牆塔樓（正面朝外）、城門樓（朝南，碰撞用 Blender 的隱藏方塊，門洞才走得過）、主堡
 	for t in L.towers:
 		var p := Vector2(t[0], t[2])
