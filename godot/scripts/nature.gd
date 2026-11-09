@@ -252,6 +252,70 @@ const COVER := {
 	"fern": [Vector2(0.5, 0.85), Vector2.ZERO],
 }
 var cover_mats: Array[ShaderMaterial] = []
+# 砍草：全部草叢依 2 m 格子索引，id = 種類 << 24 | 第幾叢；被砍的記在 cover_cut，時間到慢慢長回來
+const CUT_CELL := 2.0
+const REGROW_WAIT := 25.0
+const REGROW_TIME := 4.0
+var cover_mms: Array[MultiMesh] = []
+var cover_flower: Array[bool] = []
+var cover_cells := {}
+var cover_cut := {}   # id -> {xf 原本的 Transform3D, k 砍完剩下的高度比例, t 負值＝等待中、正值＝生長中}
+
+func _cut_cell(x: float, z: float) -> Vector2i:
+	return Vector2i(floori(x / CUT_CELL), floori(z / CUT_CELL))
+
+## 砍掉扇形範圍內的草：往下削短，回傳噴草屑／花瓣的位置（各最多 8 個）。城內修剪過的矮草不受影響
+func cut_cover(origin: Vector3, fwd: Vector3, reach: float, min_cos: float) -> Dictionary:
+	var out := {"n": 0, "blades": [], "petals": []}
+	var c0 := _cut_cell(origin.x - reach, origin.z - reach)
+	var c1 := _cut_cell(origin.x + reach, origin.z + reach)
+	for cx in range(c0.x, c1.x + 1):
+		for cz in range(c0.y, c1.y + 1):
+			for id: int in cover_cells.get(Vector2i(cx, cz), []):
+				if cover_cut.has(id):
+					continue
+				var mm := cover_mms[id >> 24]
+				var i := id & 0xFFFFFF
+				var xf := mm.get_instance_transform(i)
+				var to := xf.origin - origin
+				to.y = 0.0
+				var dist := to.length()
+				if dist > reach or absf(xf.origin.y - origin.y) > 1.5 or (dist > 0.3 and to.dot(fwd) / dist < min_cos):
+					continue
+				var h := xf.basis.y.length()
+				if h < 0.22:
+					continue
+				var k := (0.11 + 0.06 * (hash(id) % 100) / 100.0) / h
+				cover_cut[id] = {"xf": xf, "k": k, "t": -REGROW_WAIT - (hash(id) % 800) / 100.0}
+				_set_cut_height(mm, i, xf, k)
+				out.n += 1
+				var flower: bool = cover_flower[id >> 24]
+				var list: Array = out.petals if flower else out.blades
+				if list.size() < 8 and (flower or out.n % 3 == 0):
+					list.append(xf.origin)
+	return out
+
+func _set_cut_height(mm: MultiMesh, i: int, xf: Transform3D, k: float) -> void:
+	var cut := xf
+	cut.basis.y = xf.basis.y * k
+	mm.set_instance_transform(i, cut)
+
+func _process(dt: float) -> void:
+	if cover_cut.is_empty():
+		return
+	var done := []
+	for id: int in cover_cut:
+		var c: Dictionary = cover_cut[id]
+		c.t += dt
+		if c.t <= 0.0:
+			continue
+		var mm := cover_mms[id >> 24]
+		var u := clampf(c.t / REGROW_TIME, 0.0, 1.0)
+		_set_cut_height(mm, id & 0xFFFFFF, c.xf, lerpf(c.k, 1.0, smoothstep(0.0, 1.0, u)))
+		if u >= 1.0:
+			done.append(id)
+	for id in done:
+		cover_cut.erase(id)
 
 func _card_mesh(aspect: float, cards: int) -> ArrayMesh:
 	# cards 片寬 aspect、高 1 的面片，繞 Y 軸平均交叉；原點在底部中央
@@ -350,9 +414,14 @@ func plant_ground_cover(main: Node) -> void:
 		mm.use_colors = true
 		mm.mesh = mesh
 		mm.instance_count = xs.size()
+		var kind_id := cover_mms.size() << 24
+		cover_mms.append(mm)
+		cover_flower.append(kind.begins_with("flowers"))
 		for i in xs.size():
-			mm.set_instance_transform(i, xs[i][0])
+			var xf: Transform3D = xs[i][0]
+			mm.set_instance_transform(i, xf)
 			mm.set_instance_color(i, xs[i][1])
+			cover_cells.get_or_add(_cut_cell(xf.origin.x, xf.origin.z), []).append(kind_id | i)
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

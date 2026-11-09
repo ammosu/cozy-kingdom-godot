@@ -200,5 +200,62 @@ func run(actors: Node3D, nat: Node3D) -> void:
 			lowest_body = minf(lowest_body, c.global_position.y - terrain_y(c.global_position.x, c.global_position.z))
 	check("鏡頭不穿地", lowest >= 0.2, "含晃動最低 %.2f m，不含晃動 %.2f m @ %s" % [lowest, lowest_body, low_at])
 	a.pitch = -0.25
+	# 11. 砍草、揮劍的風、敵人受擊
+	await tp(24, 90, 0.876)
+	var cut_before: int = a.nature.cover_cut.size()
+	a._start_attack(0)
+	while a.attacking:
+		await get_tree().physics_frame
+	check("砍草有削短", a.nature.cover_cut.size() > cut_before, a.nature.cover_cut.size())
+	var cut_id: int = a.nature.cover_cut.keys()[0]
+	var cut_mm: MultiMesh = a.nature.cover_mms[cut_id >> 24]
+	var cut_i: int = cut_id & 0xFFFFFF
+	var full_h: float = a.nature.cover_cut[cut_id].xf.basis.y.length()
+	check("被砍的草變矮", cut_mm.get_instance_transform(cut_i).basis.y.length() < 0.2, full_h)
+	a.nature.cover_cut[cut_id].t = 3.9
+	await frames(20)
+	check("草會長回來", absf(cut_mm.get_instance_transform(cut_i).basis.y.length() - full_h) < 0.001 and not a.nature.cover_cut.has(cut_id))
+	var fog_n: Node3D = a.get_parent().fog
+	check("揮劍帶起風", fog_n.gusts.size() > 0, fog_n.gusts.size())
+	await frames(int(4.2 * Engine.physics_ticks_per_second))
+	check("霧會補回來", fog_n.gusts.is_empty(), fog_n.gusts.size())
+	var en: Dictionary = a.enemies[0]
+	var en_n: Node3D = en.node
+	await tp(en_n.global_position.x, en_n.global_position.z + 1.4, 0.0)
+	a._start_attack(0)
+	while a.stop_left <= 0.0 and a.attacking:
+		await get_tree().physics_frame
+	check("打得到敵人", en.stun > 0.0)
+	await frames(10)
+	check("敵人播受擊動作", en.anim.current_animation == "Hit_A", en.anim.current_animation)
+	await frames(90)
+	check("敵人回到待機", en.anim.current_animation == "Idle_Combat", en.anim.current_animation)
+	# 12. 跳起下劈：空中才能用、落地範圍命中、霧有衝擊波
+	await frames(60)
+	check("地上不能下劈", not a._can_plunge())
+	await tp(en_n.global_position.x + 1.2, en_n.global_position.z + 0.8, 0.9)
+	await hold(["jump"], 2)
+	await frames(10)
+	check("空中可以下劈", a._can_plunge())
+	var cut_n: int = a.nature.cover_cut.size()
+	var hit_before: float = en.stun
+	a._start_plunge()
+	var top_y: float = p.global_position.y
+	while a.plunge == 1:
+		await get_tree().physics_frame
+		top_y = maxf(top_y, p.global_position.y)
+	check("下劈先往上蹬", top_y > terrain_y(p.global_position.x, p.global_position.z) + 1.0, top_y)
+	var dive_guard := 0
+	while a.plunge == 2 and dive_guard < 120:
+		dive_guard += 1
+		await get_tree().physics_frame
+	check("俯衝很快落地", dive_guard < 40, dive_guard)
+	check("落地卡肉", a.stop_left > 0.0)
+	check("落地打到周圍的敵人", en.stun > 0.0 and en.stun != hit_before, en.stun)
+	check("落地砍掉一圈草", a.nature.cover_cut.size() >= cut_n)
+	check("落地產生衝擊波", fog_n.blasts.size() == 1, fog_n.blasts.size())
+	await frames(int(7.0 * Engine.physics_ticks_per_second))
+	check("衝擊波結束", fog_n.blasts.is_empty(), fog_n.blasts.size())
+	check("下劈收招", not a.attacking and a.plunge == 0)
 	print("SELFTEST done fails=", fails)
 	get_tree().quit()

@@ -19,6 +19,12 @@ var target: Node3D
 var idx := 0
 var label: Label
 var label_t := 0.0
+const GUST_MAX := 4
+const BLAST_MAX := 2
+const BLAST_R := 8.0
+const BLAST_LIFE := 4.5
+var blasts: Array = []         # 下劈的衝擊波：{o 落點, t 經過秒數}
+var gusts: Array = []          # 揮劍的風：{o 起點, d 方向, len 最終長度, r 半徑, life 全長, t 經過秒數}
 
 func setup(e: Environment, s: DirectionalLight3D) -> void:
 	env = e
@@ -164,6 +170,7 @@ func apply(i: int) -> void:
 	env.volumetric_fog_gi_inject = 1.0 if idx == 0 else 0.25
 	env.adjustment_saturation = [1.05, 0.98, 0.8][idx]   # 霧裡的顏色會變淡，前景不能還是飽和的鮮綠
 	mat.set_shader_parameter("density", p[5])
+	mat.set_shader_parameter("ground_density", 0.0 if idx == 0 else 0.2)
 	mat.set_shader_parameter("near_start", 8.0 if idx < 2 else 14.0)
 	mat.set_shader_parameter("mist_height", p[6])
 	mat.set_shader_parameter("coverage", p[7])
@@ -178,7 +185,59 @@ func _unhandled_key_input(e: InputEvent) -> void:
 	if e.is_pressed() and not e.is_echo() and (e as InputEventKey).keycode == KEY_F:
 		apply(idx + 1)
 
+## 揮劍時呼叫：從 origin 往 dir 吹開一道風，霧散開後慢慢補回來
+func gust(origin: Vector3, dir: Vector3, heavy: bool) -> void:
+	if gusts.size() >= GUST_MAX:
+		gusts.pop_front()
+	gusts.append({"o": origin, "d": dir.normalized(), "len": 16.0 if heavy else 11.0, "r": 3.4 if heavy else 2.4, "life": 2.8 if heavy else 2.2, "t": 0.0})
+
+## 下劈落地：衝擊波從落點往外推，霧堆在波前翻起，之後從外圍回流
+func blast(origin: Vector3) -> void:
+	if blasts.size() >= BLAST_MAX:
+		blasts.pop_front()
+	blasts.append({"o": origin, "t": 0.0})
+
+func _update_gusts(dt: float) -> void:
+	var had := not gusts.is_empty() or not blasts.is_empty()
+	var kept := []
+	for g in gusts:
+		g.t += dt
+		if g.t < g.life:
+			kept.append(g)
+	gusts = kept
+	kept = []
+	for b in blasts:
+		b.t += dt
+		if b.t < BLAST_LIFE:
+			kept.append(b)
+	blasts = kept
+	if not had:
+		return
+	var pa := PackedVector4Array(); var pb := PackedVector4Array(); var pr := PackedFloat32Array()
+	pa.resize(GUST_MAX); pb.resize(GUST_MAX); pr.resize(GUST_MAX)
+	for i in gusts.size():
+		var g: Dictionary = gusts[i]
+		var grow := 1.0 - pow(1.0 - clampf(g.t / 0.25, 0.0, 1.0), 3.0)   # 風一下子衝出去
+		var close := smoothstep(g.life, 0.5, g.t)                         # 通道從兩側慢慢合攏，不是整片變淡
+		pa[i] = Vector4(g.o.x, g.o.y, g.o.z, g.len * grow)
+		pb[i] = Vector4(g.d.x, g.d.y, g.d.z, smoothstep(0.0, 0.12, close))
+		pr[i] = g.r * (0.5 + 0.5 * grow) * close
+	var ba := PackedVector4Array(); var bb := PackedVector4Array()
+	ba.resize(BLAST_MAX); bb.resize(BLAST_MAX)
+	for i in blasts.size():
+		var b: Dictionary = blasts[i]
+		var front: float = BLAST_R * (1.0 - exp(-b.t / 0.3))                 # 一開始極快，很快被空氣減速
+		var hole: float = front * (1.0 - smoothstep(1.0, BLAST_LIFE, b.t))   # 霧從外圍往中心回流
+		ba[i] = Vector4(b.o.x, b.o.y, b.o.z, maxf(front, 0.01))
+		bb[i] = Vector4(hole, exp(-b.t / 0.8), front * 0.55, 0.0)
+	mat.set_shader_parameter("gust_a", pa)
+	mat.set_shader_parameter("gust_b", pb)
+	mat.set_shader_parameter("gust_r", pr)
+	mat.set_shader_parameter("blast_a", ba)
+	mat.set_shader_parameter("blast_b", bb)
+
 func _process(dt: float) -> void:
+	_update_gusts(dt)
 	var cam := get_viewport().get_camera_3d()
 	if cam:
 		mat.set_shader_parameter("cam_pos", cam.global_position)
