@@ -71,6 +71,8 @@ const WALK_SPEED := 2.4
 const RUN_SPEED := 6.0
 const MOUNT_SPEED := 9.0
 const GRAVITY := 22.0
+const WORLD_R := 300.0    # 可走範圍半徑；地形只到 ±360，山脊外就是虛空
+const FALL_Y := -40.0     # 掉到地形下方就送回出生點
 const JUMP_V := 8.0
 const ATTACK_TIME := 0.46
 const SHEATHE_AFTER := 2.5
@@ -101,7 +103,7 @@ func _v(a: Array) -> Vector3:
 
 
 func _ground_y(x: float, z: float) -> float:
-	var q := PhysicsRayQueryParameters3D.create(Vector3(x, 80, z), Vector3(x, -40, z))
+	var q := PhysicsRayQueryParameters3D.create(Vector3(x, 400, z), Vector3(x, -40, z))
 	if player:
 		q.exclude = [player.get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
@@ -145,7 +147,11 @@ func _make_player() -> void:
 	add_child(cam_pivot)
 	spring = SpringArm3D.new()
 	spring.spring_length = 5.5
-	spring.margin = 0.3
+	# 用球體掃掠：單條射線只保證中心點，貼著地面時鏡頭只離地幾公分。半徑要小於玩家膠囊（0.3），起點才不會卡進牆裡
+	var cam_shape := SphereShape3D.new()
+	cam_shape.radius = 0.25
+	spring.shape = cam_shape
+	spring.margin = 0.12
 	spring.add_excluded_object(player.get_rid())
 	cam_pivot.add_child(spring)
 	camera = Camera3D.new()
@@ -154,7 +160,7 @@ func _make_player() -> void:
 	spring.add_child(camera)
 	if OS.get_environment("SHOT") == "":
 		camera.make_current()
-		if not demo and OS.get_environment("SELFTEST") == "":
+		if not demo and OS.get_environment("SELFTEST") == "" and OS.get_environment("REEL") == "":
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
@@ -401,6 +407,38 @@ func _unhandled_input(e: InputEvent) -> void:
 		_toggle_mount()
 
 
+# 鏡頭到正下方地面的距離（晃動幅度不能超過它）
+func _camera_clearance() -> float:
+	var from := camera.global_position
+	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 3.0)
+	q.exclude = [player.get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	return 3.0 if hit.is_empty() else from.y - hit.position.y
+
+# 走到世界邊界時去掉往外的速度，沿邊界滑動，走路動畫也會跟實際速度一致
+func _limit_to_world() -> void:
+	var pos := Vector2(player.global_position.x, player.global_position.z)
+	if pos.length() < WORLD_R:
+		return
+	var n := pos.normalized()
+	var v := Vector2(player.velocity.x, player.velocity.z)
+	var out := v.dot(n)
+	if out > 0.0:
+		v -= n * out
+		player.velocity.x = v.x
+		player.velocity.z = v.y
+
+func _clamp_to_world() -> void:
+	var pos := Vector2(player.global_position.x, player.global_position.z)
+	if pos.length() > WORLD_R:
+		pos = pos.normalized() * WORLD_R
+		player.global_position.x = pos.x
+		player.global_position.z = pos.y
+	if player.global_position.y < FALL_Y:
+		var sp := _v(layout.spawn)
+		player.global_position = Vector3(sp.x, _ground_y(sp.x, sp.z) + 0.1, sp.z)
+		vel_y = 0.0
+
 func _physics_process(dt: float) -> void:
 	if player == null:
 		return
@@ -445,7 +483,9 @@ func _physics_process(dt: float) -> void:
 	else:
 		vel_y -= GRAVITY * dt
 	player.velocity.y = vel_y
+	_limit_to_world()
 	player.move_and_slide()
+	_clamp_to_world()
 	var moved := Vector2(player.global_position.x - before.x, player.global_position.z - before.z).length()
 	if dir.length() > 0.05 and not attacking:
 		var target := atan2(-dir.x, -dir.z)
@@ -463,6 +503,10 @@ func _physics_process(dt: float) -> void:
 	# 鏡頭晃動（平方衰減，小晃動幾乎察覺不到）
 	shake = move_toward(shake, 0.0, dt * 1.6)
 	var a := shake * shake * 0.55
+	a *= smoothstep(0.35, 1.0, spring.get_hit_length() / spring.spring_length)   # 鏡頭被擠近地面或牆時不晃，不然會晃進去
+	if a > 0.001:
+		a = min(a, _camera_clearance() - 0.3)
+		a = maxf(a, 0.0)
 	var tt := Time.get_ticks_msec() * 0.001
 	camera.h_offset = sin(tt * 47.0) * a
 	camera.v_offset = sin(tt * 61.0 + 1.3) * a

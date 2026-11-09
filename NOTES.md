@@ -27,7 +27,7 @@
 6. **截圖**：`[REL=1] tools/shot.sh <名稱> "x,y,z" "x,y,z" [frames]`
    - `REL=1` 時 y 代表離地高度。
 7. **示範影片**：`tools/record.sh <名稱>` → `video/<名稱>.mp4`
-   - 時間軸寫在 `actors.gd` 的 `DEMO_STEPS`。
+   - 時間軸寫在 `actors.gd` 的 `DEMO_STEPS`。`REEL=1 tools/record.sh <名稱>` 錄分段展示版，內容寫在 `godot/scripts/demo_reel.gd`。
    - 用 `tools/contact.sh video/x.mp4 1.0` 出縮圖總表。
 
 操作：WASD 移動、Shift 跑、Space 跳、R 召喚／上下麋鹿、Esc 放開滑鼠。
@@ -52,4 +52,7 @@
 - **陰影梳齒**：屋簷下規律的鋸齒是陰影貼圖解析度不足，要調 `directional_shadow_split_*`、`light_angular_distance = 0`，調 bias 沒用。
 - **Paint 的記憶體**：voxcpm-api 開著時 8 視角／512 可以跑，768 會記憶體不足。殘留的上色程序也會讓後面的批次全部失敗，批次中斷後要確認沒有舊程序。
 - **減面門檻**：體素重建的判斷要看原始面數（>120 萬），綁目標面數的話，目標調高就不會觸發。
+- **鏡頭貼地**：SpringArm 的單條射線只保證中心點，鏡頭仰角大時只離地幾公分，再加晃動就穿地。改用球體掃掠，半徑要小於玩家膠囊，起點才不會卡進牆裡。
+- **地形邊界**：地形只到 ±360，外圈是山丘，爬得上去就會走出地面掉進虛空，玩家要限制在半徑 300 內。
+- **768 上色**：要 `HY_RES=768 HY_TEX=4096 HY_VAE_SLICE=1` 並暫停 voxcpm。`HY_TEX` 的實際輸出是一半，8 視角不開逐張解碼會記憶體不足。
 - **相關筆記**：beach3d-eval 的 `PLAYBOOK.md` 有 Tripo 與 Blender 的其他筆記。

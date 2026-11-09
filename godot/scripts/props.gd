@@ -131,6 +131,54 @@ func _scatter(L: Dictionary, plaza: Vector2) -> void:
 				place("ck_lamppost", p, _yaw_to(p, a + dir * t), {"height": 3.4})
 			n += 1
 			t += 14.0
+	_extras(L, plaza)
+
+## 外部素材（Scenario 3D Collection，CC BY 4.0，見 CREDITS.md）：城外屋舍、岩石、熔爐、工作桌、狐狸
+func _extras(L: Dictionary, plaza: Vector2) -> void:
+	var r2 := RandomNumberGenerator.new()   # 獨立亂數，不影響原本的配置
+	r2.seed = 41
+	var cottage := _flattest(Vector2(-24, 86), 22.0, 5.0)
+	var cabin := _flattest(Vector2(31, 104), 24.0, 5.0)
+	place("sc_cottage", cottage, _yaw_to(cottage, Vector2(0, cottage.y)), {"height": 7.5, "sink": 0.15})
+	place("sc_cabin", cabin, _yaw_to(cabin, Vector2(0, cabin.y)), {"height": 6.2, "sink": 0.15})
+	print("extras cottage ", cottage, " cabin ", cabin)
+	place("sc_fox", cottage + Vector2(sign(-cottage.x) * 6.0, -2.0), 75.0, {"height": 0.6, "collide": false})
+	place("sc_fox", cabin + Vector2(sign(-cabin.x) * 6.5, -4.0), -40.0, {"height": 0.5, "collide": false})
+	# 熔爐擺在鐵匠鋪旁
+	for c in get_children():
+		if not String(c.name).begins_with("ck_smithy"):
+			continue
+		var yaw: float = c.rotation.y
+		var pos := Vector2(c.position.x, c.position.z)
+		var fwd := Vector2(sin(yaw), cos(yaw))
+		var side := Vector2(fwd.y, -fwd.x)
+		for s in [1.0, -1.0]:
+			var at: Vector2 = pos + side * s * 5.6 + fwd * 1.2
+			if _free(at, 1.3):
+				place("sc_furnace", at, rad_to_deg(yaw), {"height": 2.5})
+				print("extras furnace ", at)
+				break
+	# 工作桌擺在廣場外圈
+	for i in 24:
+		var ang := TAU * i / 24.0 + 0.5
+		var at: Vector2 = plaza + Vector2(cos(ang), sin(ang)) * (L.plaza_radius + 1.8)
+		if _free(at, 1.4):
+			place("sc_workbench", at, _yaw_to(at, plaza), {"height": 1.35})
+			print("extras workbench ", at)
+			break
+	# 岩石：城外草地，大石才有碰撞
+	var placed := 0
+	for i in 900:
+		if placed >= 120:
+			break
+		var ang := r2.randf() * TAU
+		var dist := r2.randf_range(L.wall_radius + 7.0, 175.0)
+		var at := Vector2(cos(ang), sin(ang)) * dist
+		if not _on_grass(at, 1.4):
+			continue
+		var h := r2.randf_range(0.35, 1.1) if r2.randf() < 0.8 else r2.randf_range(1.2, 2.6)
+		place("sc_rock_%d" % r2.randi_range(1, 6), at, r2.randf() * 360.0, {"height": h, "sink": h * 0.18, "collide": h > 0.9, "tint": Color(0.86, 0.76, 0.62)})
+		placed += 1
 
 ## 把攤位換成會隨風擺動的材質（同一款共用一個材質）
 func _add_cloth_wind(holder: Node3D) -> void:
@@ -190,6 +238,32 @@ func _lots(L: Dictionary) -> void:
 		var g: Vector2 = c - fwd * (h.d * 0.5 + 1.75) + side * (rng.randf_range(-1.0, 1.0) * h.w * 0.2)
 		if _exists("ck_garden") and _on_grass(g, 1.3):
 			place("ck_garden", g, h.yaw, {"fit": [2.6, 1.9]})
+
+## 在 center 附近找占地 foot 公尺內高低差最小的草地（地形是丘陵，房子擺在斜坡上會被埋掉一邊）
+func _flattest(center: Vector2, search: float, foot: float) -> Vector2:
+	var best := center
+	var best_range := INF
+	var step := 3.0
+	var x := -search
+	while x <= search:
+		var z := -search
+		while z <= search:
+			var c := center + Vector2(x, z)
+			z += step
+			if absf(c.x) < 15.0 or c.length() < 72.0 or not _on_grass(c, foot):   # 不擋城門大道和城牆前的視野
+				continue
+			var lo := INF
+			var hi := -INF
+			for o in [Vector2.ZERO, Vector2(foot, foot), Vector2(-foot, foot), Vector2(foot, -foot), Vector2(-foot, -foot), Vector2(foot, 0), Vector2(-foot, 0), Vector2(0, foot), Vector2(0, -foot)]:
+				var y: float = _ground(c + o).position.y
+				lo = minf(lo, y)
+				hi = maxf(hi, y)
+			if hi - lo < best_range:
+				best_range = hi - lo
+				best = c
+		x += step
+	print("extras flat range %.2f at %s" % [best_range, best])
+	return best
 
 func _on_grass(p: Vector2, r: float) -> bool:
 	for o in [Vector2.ZERO, Vector2(r, 0), Vector2(-r, 0), Vector2(0, r), Vector2(0, -r)]:
@@ -259,7 +333,7 @@ func place(file: String, p: Vector2, yaw_deg: float, opt: Dictionary) -> Node3D:
 	var hit := _ground(p)
 	if not hit.is_empty():
 		y = hit.position.y
-	holder.position = Vector3(p.x, y - 0.05, p.y)
+	holder.position = Vector3(p.x, y - 0.05 - float(opt.get("sink", 0.0)), p.y)
 	holder.rotation.y = deg_to_rad(yaw_deg)
 	if opt.get("collide", true):
 		for mi in node.find_children("*", "MeshInstance3D", true, false):
