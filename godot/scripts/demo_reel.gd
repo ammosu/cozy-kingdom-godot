@@ -48,7 +48,18 @@ func combo(ang: float, cam_yaw: float) -> void:
 		while a.attacking:
 			await get_tree().physics_frame
 
-## 互動測試片（REEL=interact tools/record.sh <名稱>）：打骷髏、揮風吹開低霧
+## 跳起下劈，鏡頭停在 cam_yaw
+func leap(ang: float, cam_yaw: float) -> void:
+	a.yaw = cam_yaw
+	await hold(["jump"], 2)
+	await frames(sec(0.22))
+	a.yaw = ang
+	a._start_plunge()
+	a.yaw = cam_yaw
+	while a.plunge != 0:
+		await get_tree().physics_frame
+
+## 互動測試片（REEL=interact tools/record.sh <名稱>）：下劈打骷髏、兩種霧裡的下劈和揮砍
 func interact(actors: Node3D, fog: Node) -> void:
 	a = actors
 	fade.color.a = 1.0
@@ -56,25 +67,23 @@ func interact(actors: Node3D, fog: Node) -> void:
 	var n: Node3D = a.enemies[0].node
 	var to_e := atan2(1.0, 1.0)
 	a.pitch = -0.2
-	await tp(n.global_position.x + 1.0, n.global_position.z + 1.0, to_e + 1.5)
+	await tp(n.global_position.x + 1.4, n.global_position.z + 1.4, to_e + 1.5)
 	await frames(sec(1.0))
 	await set_fade(1.0, 0.0, 0.3)
-	await frames(sec(0.8))
-	await combo(to_e, to_e + 1.5)
-	await frames(sec(1.5))
+	await frames(sec(0.6))
+	await leap(to_e, to_e + 1.5)
+	await frames(sec(2.0))
 	for preset in [2, 1]:
 		await set_fade(0.0, 1.0, 0.25)
 		fog.apply(preset)
-		a.pitch = -0.3
+		a.pitch = -0.42
 		await tp(0, 110, 3.14)
 		await frames(sec(4.0))
 		await set_fade(1.0, 0.0, 0.3)
-		await frames(sec(2.0))
+		await frames(sec(1.5))
+		await leap(3.14, 3.14)
+		await frames(sec(7.0))
 		await combo(3.14, 3.14)
-		await frames(sec(4.5))
-		a.yaw = 3.14 + 1.4
-		await frames(sec(1.0))
-		await combo(3.14, 3.14 + 1.4)
 		await frames(sec(4.5))
 	await set_fade(0.0, 1.0, 0.25)
 	get_tree().quit()
@@ -92,6 +101,11 @@ func reel(actors: Node3D, fog: Node) -> void:
 	# 2. 草地奔跑：踏草與風吹
 	await cut(24, 90, -1.2, -0.3)
 	await hold(["move_forward", "run"], sec(4.0))
+	# 2b. 砍草：揮過的地方草被削短
+	await cut(22, 88, 0.876 + 1.3, -0.5)
+	await frames(sec(0.6))
+	await combo(0.876, 0.876 + 1.3)
+	await frames(sec(1.4))
 	# 3. 三段連擊，鏡頭在側前方才看得到揮劍
 	var d: Dictionary = a.villagers[0]
 	var n: Node3D = d.node
@@ -109,6 +123,13 @@ func reel(actors: Node3D, fog: Node) -> void:
 		while a.attacking:
 			await get_tree().physics_frame
 	await frames(sec(0.6))
+	# 3b. 跳起下劈打骷髏
+	var en: Node3D = a.enemies[0].node
+	var to_e := atan2(1.0, 1.0)
+	await cut(en.global_position.x + 1.4, en.global_position.z + 1.4, to_e - 1.4, -0.2)
+	await frames(sec(0.5))
+	await leap(to_e, to_e - 1.4)
+	await frames(sec(1.6))
 	# 4. 噴水池
 	await cut(3.5, 13.5, 0.566, -0.1)
 	await hold(["move_forward"], sec(0.8))
@@ -146,6 +167,13 @@ func reel(actors: Node3D, fog: Node) -> void:
 	await frames(sec(1.5))
 	await set_fade(1.0, 0.0, 0.3)
 	await hold(["move_forward", "run"], sec(5.0))
+	# 7b. 晨霧裡揮砍和下劈，低霧被吹開再補回來
+	await cut(0, 110, 3.14, -0.38)
+	await frames(sec(1.0))
+	await combo(3.14, 3.14)
+	await frames(sec(2.0))
+	await leap(3.14, 3.14)
+	await frames(sec(3.0))
 	# 8. 濃霧
 	await set_fade(0.0, 1.0, 0.25)
 	fog.apply(2)
@@ -154,5 +182,10 @@ func reel(actors: Node3D, fog: Node) -> void:
 	await frames(sec(1.5))
 	await set_fade(1.0, 0.0, 0.3)
 	await hold(["move_forward"], sec(4.0))
+	# 8b. 濃霧裡下劈
+	await cut(0, 110, 3.14, -0.38)
+	await frames(sec(1.0))
+	await leap(3.14, 3.14)
+	await frames(sec(3.5))
 	await set_fade(0.0, 1.0, 0.4)
 	get_tree().quit()

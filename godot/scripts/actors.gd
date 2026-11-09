@@ -53,6 +53,8 @@ var attack_swing := 0
 var attack_queued := false
 var attack_hit := false
 var attack_rest := 0.0     # 收劍倒數
+var plunge := 0            # 下劈：0 沒有、1 空中舉劍、2 俯衝
+var plunge_t := 0.0
 var stop_left := 0.0       # 卡肉剩餘秒數：只停玩家和被打的人，世界照常動
 var attack_landed := false # 這一擊打中了，收掉往前踏的衝力
 var whoosh_done := false
@@ -89,7 +91,13 @@ const SWINGS := [
 	{"time": 0.40, "at": 0.42, "stop": 0.05, "knock": 5.0, "shake": 0.24, "kick": Vector2(1.2, 0.0), "fov": 0.9},
 	{"time": 0.40, "at": 0.42, "stop": 0.06, "knock": 6.0, "shake": 0.26, "kick": Vector2(-1.4, 0.0), "fov": 1.1},
 	{"time": 0.62, "at": 0.50, "stop": 0.11, "knock": 9.5, "shake": 0.36, "kick": Vector2(0.0, -2.6), "fov": 2.2},
+	{"time": 0.55, "at": 0.44, "stop": 0.13, "knock": 11.0, "shake": 0.52, "kick": Vector2(0.0, -3.6), "fov": 3.2},   # 跳起下劈，落地才算命中
 ]
+const PLUNGE_HOP := 6.5      # 按下時再往上蹬一下，看得出蓄力
+const PLUNGE_HANG := 0.24    # 舉劍停在空中的秒數
+const PLUNGE_FALL := 26.0    # 俯衝速度
+const PLUNGE_R := 2.6        # 落地的影響半徑
+const PLUNGE_MIN_H := 0.6    # 離地太近不能下劈，避免一跳就砸
 const SHEATHE_AFTER := 2.5
 const PUSH_R := 0.75        # 玩家和村民的軟碰撞半徑（兩人圓心距）
 const SWORD := "res://assets/chars/sword.glb"
@@ -249,6 +257,9 @@ func _update_attack(dt: float) -> void:
 		pose.t = hold_t
 		pose.weight = 1.0
 		return
+	if plunge != 0:
+		_update_plunge()
+		return
 	if stop_left > 0.0:
 		stop_left -= dt
 		player_anim.speed_scale = 0.0
@@ -276,6 +287,80 @@ func _update_attack(dt: float) -> void:
 		attack_rest -= dt
 		if attack_rest <= 0.0:
 			_show_sword(false)
+
+
+## 離地夠高才算空中（走下小坡不會誤判）
+func _can_plunge() -> bool:
+	if mounted or plunge != 0 or player.is_on_floor():
+		return false
+	var from := player.global_position
+	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * PLUNGE_MIN_H)
+	q.exclude = [player.get_rid()]
+	return get_world_3d().direct_space_state.intersect_ray(q).is_empty()
+
+
+func _start_plunge() -> void:
+	attacking = true
+	attack_t = 0.0
+	attack_swing = 3
+	attack_hit = true
+	attack_landed = true
+	whoosh_done = true
+	attack_queued = false
+	attack_rest = SHEATHE_AFTER
+	plunge = 1
+	plunge_t = 0.0
+	vel_y = PLUNGE_HOP
+	player.rotation.y = yaw
+	pose.swing = 3
+	_show_sword(true)
+
+
+func _update_plunge() -> void:
+	pose.swing = 3
+	pose.weight = clampf(plunge_t / 0.06, 0.0, 1.0)
+	if plunge == 1:
+		pose.t = 0.3 * clampf(plunge_t / PLUNGE_HANG, 0.0, 1.0)
+		return
+	pose.t = minf(pose.t + 0.004, 0.36)
+	fx.add_trail(sword_hilt.global_position, sword_tip.global_position)
+	if player.is_on_floor():
+		_land_plunge()
+
+
+func _land_plunge() -> void:
+	plunge = 0
+	attack_t = 0.42
+	var cfg: Dictionary = SWINGS[3]
+	var p := player.global_position
+	var fwd := -player.global_basis.z
+	var struck := 0
+	for d in villagers + stall_vs + enemies:
+		var n: Node3D = d.node
+		var to: Vector3 = n.global_position - p
+		to.y = 0.0
+		if to.length() < PLUNGE_R:
+			var dir := to.normalized() if to.length() > 0.05 else fwd
+			var near_cfg := cfg.duplicate()
+			near_cfg.knock = cfg.knock * lerpf(1.0, 0.55, to.length() / PLUNGE_R)   # 越靠近落點飛越遠
+			_hit_npc(d, dir, near_cfg)
+			fx.impact(n.global_position + Vector3.UP * 0.8 - dir * 0.3, dir, true)
+			struck += 1
+	var cut: Dictionary = nature.cut_cover(p, fwd, PLUNGE_R, -1.1)
+	for s: Vector3 in cut.blades:
+		fx.burst("blade", s + Vector3.UP * 0.25, 4, 2.8, 3.4, 0.2, 0.7)
+	for s: Vector3 in cut.petals:
+		fx.burst("petal", s + Vector3.UP * 0.25, 6, 2.6, 3.0, 0.13, 1.1)
+	fx.impact(p + fwd * 0.7 + Vector3.UP * 0.1, Vector3.UP, true)
+	for i in 10:
+		var a := TAU * i / 10.0
+		fx.burst("dust", p + Vector3(cos(a), 0.08, sin(a)) * 0.6, 2, 3.0, 0.4, 0.34, 0.6)
+	get_parent().fog.blast(p)
+	sfx.play("hit_heavy" if struck > 0 else "hit_hard")
+	_add_shake(cfg.shake)
+	cam_kick_v += cfg.kick
+	fov_kick = maxf(fov_kick, cfg.fov)
+	stop_left = cfg.stop
 
 
 func _resolve_hit() -> void:
@@ -489,7 +574,11 @@ func _unhandled_input(e: InputEvent) -> void:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED    # 視窗放開滑鼠後，點一下回到遊戲
 		elif not mounted:
-			if not attacking:
+			if _can_plunge():
+				_start_plunge()
+			elif plunge != 0:
+				pass
+			elif not attacking:
 				_start_attack(0)
 			elif attack_t > 0.3:
 				attack_queued = true
@@ -573,7 +662,18 @@ func _physics_process(dt: float) -> void:
 		player.velocity.x = 0.0
 		player.velocity.z = 0.0
 	var before := player.global_position
-	if player.is_on_floor():
+	if plunge == 1:
+		plunge_t += dt
+		vel_y -= GRAVITY * dt
+		if plunge_t >= PLUNGE_HANG:
+			plunge = 2
+			sfx.play("whoosh_heavy")
+	elif plunge == 2:
+		vel_y = -PLUNGE_FALL
+		var drift := -player.global_basis.z * 5.0
+		player.velocity.x += drift.x
+		player.velocity.z += drift.z
+	elif player.is_on_floor():
 		vel_y = -1.0
 		if Input.is_action_just_pressed("jump") and not mounted:
 			vel_y = JUMP_V

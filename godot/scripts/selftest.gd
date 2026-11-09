@@ -230,5 +230,32 @@ func run(actors: Node3D, nat: Node3D) -> void:
 	check("敵人播受擊動作", en.anim.current_animation == "Hit_A", en.anim.current_animation)
 	await frames(90)
 	check("敵人回到待機", en.anim.current_animation == "Idle_Combat", en.anim.current_animation)
+	# 12. 跳起下劈：空中才能用、落地範圍命中、霧有衝擊波
+	await frames(60)
+	check("地上不能下劈", not a._can_plunge())
+	await tp(en_n.global_position.x + 1.2, en_n.global_position.z + 0.8, 0.9)
+	await hold(["jump"], 2)
+	await frames(10)
+	check("空中可以下劈", a._can_plunge())
+	var cut_n: int = a.nature.cover_cut.size()
+	var hit_before: float = en.stun
+	a._start_plunge()
+	var top_y: float = p.global_position.y
+	while a.plunge == 1:
+		await get_tree().physics_frame
+		top_y = maxf(top_y, p.global_position.y)
+	check("下劈先往上蹬", top_y > terrain_y(p.global_position.x, p.global_position.z) + 1.0, top_y)
+	var dive_guard := 0
+	while a.plunge == 2 and dive_guard < 120:
+		dive_guard += 1
+		await get_tree().physics_frame
+	check("俯衝很快落地", dive_guard < 40, dive_guard)
+	check("落地卡肉", a.stop_left > 0.0)
+	check("落地打到周圍的敵人", en.stun > 0.0 and en.stun != hit_before, en.stun)
+	check("落地砍掉一圈草", a.nature.cover_cut.size() >= cut_n)
+	check("落地產生衝擊波", fog_n.blasts.size() == 1, fog_n.blasts.size())
+	await frames(int(7.0 * Engine.physics_ticks_per_second))
+	check("衝擊波結束", fog_n.blasts.is_empty(), fog_n.blasts.size())
+	check("下劈收招", not a.attacking and a.plunge == 0)
 	print("SELFTEST done fails=", fails)
 	get_tree().quit()
