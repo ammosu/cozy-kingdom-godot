@@ -43,6 +43,10 @@ func _ready() -> void:
 		var t: Node = load("res://scripts/selftest.gd").new()
 		add_child(t)
 		t.run($Actors, nature)
+	if OS.get_environment("REEL") != "":
+		var r: Node = load("res://scripts/demo_reel.gd").new()
+		add_child(r)
+		r.reel($Actors, fog)
 
 # ---------- 天空、太陽、後製 ----------
 func _build_environment() -> void:

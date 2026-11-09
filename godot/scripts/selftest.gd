@@ -28,6 +28,21 @@ func hold(act: Array, n: int) -> void:
 	for x in act:
 		Input.action_release(x)
 
+# 鏡頭正下方的地形高度（略過樹與建築的碰撞）
+func terrain_y(x: float, z: float) -> float:
+	var space: PhysicsDirectSpaceState3D = a.get_world_3d().direct_space_state
+	var ex := [a.player.get_rid()]
+	for i in 12:
+		var q := PhysicsRayQueryParameters3D.create(Vector3(x, 500, z), Vector3(x, -60, z))
+		q.exclude = ex
+		var hit := space.intersect_ray(q)
+		if hit.is_empty():
+			return -INF
+		if String(hit.collider.get_parent().name).begins_with("Terrain"):
+			return hit.position.y
+		ex.append(hit.rid)
+	return -INF
+
 func snap(name: String) -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../shots/%s.png" % name))
@@ -114,5 +129,43 @@ func run(actors: Node3D, nat: Node3D) -> void:
 	a._toggle_mount()
 	await frames(10)
 	check("下坐騎", not a.mounted)
+	# 11. 世界邊界：跑不出去，會沿著邊界滑
+	# 外圈山坡太陡，走路到不了邊界，所以直接放到界外，再從界線上往外跑
+	await tp(0, 310, PI)
+	var edge := Vector2(p.global_position.x, p.global_position.z).length()
+	check("界外會被拉回", edge <= a.WORLD_R + 0.05, "r=%.2f" % edge)
+	await tp(0, a.WORLD_R, PI)
+	var max_r := 0.0
+	Input.action_press("move_forward"); Input.action_press("run")
+	for i in 40:
+		await get_tree().physics_frame
+		max_r = maxf(max_r, Vector2(p.global_position.x, p.global_position.z).length())
+	Input.action_release("move_forward"); Input.action_release("run")
+	check("世界邊界擋住", max_r <= a.WORLD_R + 0.05, "max r=%.2f" % max_r)
+	# 12. 掉到地形下會回出生點
+	p.global_position.y = a.FALL_Y - 5.0
+	await frames(4)
+	check("掉出地形會回來", p.global_position.y > a.FALL_Y, p.global_position)
+	# 13. 平地、緩坡、山腰各轉一圈，鏡頭仰到底加晃動，都要在地面上
+	var lowest := INF
+	var lowest_body := INF
+	var low_at := Vector3.ZERO
+	var spots := [Vector2(0, 30), Vector2(22, 84), Vector2(120, 90), Vector2(190, 150), Vector2(-160, 150), Vector2(0, 290)]
+	for spot: Vector2 in spots:
+		await tp(spot.x, spot.y)
+		a.pitch = 0.4
+		for i in 16:
+			a.yaw = TAU * i / 16.0
+			a.shake = 1.0
+			await frames(3)
+			var c: Camera3D = a.camera
+			var eye := c.global_position + c.global_basis.y * c.v_offset + c.global_basis.x * c.h_offset
+			var g := eye.y - terrain_y(eye.x, eye.z)
+			if g < lowest:
+				lowest = g
+				low_at = eye
+			lowest_body = minf(lowest_body, c.global_position.y - terrain_y(c.global_position.x, c.global_position.z))
+	check("鏡頭不穿地", lowest >= 0.2, "含晃動最低 %.2f m，不含晃動 %.2f m @ %s" % [lowest, lowest_body, low_at])
+	a.pitch = -0.25
 	print("SELFTEST done fails=", fails)
 	get_tree().quit()
