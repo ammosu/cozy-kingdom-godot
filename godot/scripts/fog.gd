@@ -19,6 +19,8 @@ var target: Node3D
 var idx := 0
 var label: Label
 var label_t := 0.0
+const GUST_MAX := 4
+var gusts: Array = []          # 揮劍的風：{o 起點, d 方向, len 最終長度, r 半徑, life 全長, t 經過秒數}
 
 func setup(e: Environment, s: DirectionalLight3D) -> void:
 	env = e
@@ -164,6 +166,7 @@ func apply(i: int) -> void:
 	env.volumetric_fog_gi_inject = 1.0 if idx == 0 else 0.25
 	env.adjustment_saturation = [1.05, 0.98, 0.8][idx]   # 霧裡的顏色會變淡，前景不能還是飽和的鮮綠
 	mat.set_shader_parameter("density", p[5])
+	mat.set_shader_parameter("ground_density", 0.0 if idx == 0 else 0.2)
 	mat.set_shader_parameter("near_start", 8.0 if idx < 2 else 14.0)
 	mat.set_shader_parameter("mist_height", p[6])
 	mat.set_shader_parameter("coverage", p[7])
@@ -178,7 +181,37 @@ func _unhandled_key_input(e: InputEvent) -> void:
 	if e.is_pressed() and not e.is_echo() and (e as InputEventKey).keycode == KEY_F:
 		apply(idx + 1)
 
+## 揮劍時呼叫：從 origin 往 dir 吹開一道風，霧散開後慢慢補回來
+func gust(origin: Vector3, dir: Vector3, heavy: bool) -> void:
+	if gusts.size() >= GUST_MAX:
+		gusts.pop_front()
+	gusts.append({"o": origin, "d": dir.normalized(), "len": 40.0 if heavy else 28.0, "r": 8.0 if heavy else 5.5, "life": 4.0 if heavy else 3.0, "t": 0.0})
+
+func _update_gusts(dt: float) -> void:
+	var kept := []
+	for g in gusts:
+		g.t += dt
+		if g.t < g.life:
+			kept.append(g)
+	var had := not gusts.is_empty()
+	gusts = kept
+	if gusts.is_empty() and not had:
+		return
+	var pa := PackedVector4Array(); var pb := PackedVector4Array(); var pr := PackedFloat32Array()
+	pa.resize(GUST_MAX); pb.resize(GUST_MAX); pr.resize(GUST_MAX)
+	for i in gusts.size():
+		var g: Dictionary = gusts[i]
+		var grow := 1.0 - pow(1.0 - clampf(g.t / 0.25, 0.0, 1.0), 3.0)   # 風一下子衝出去
+		var fade := smoothstep(g.life, 0.5, g.t)                          # 停一下，再從四周慢慢補回來
+		pa[i] = Vector4(g.o.x, g.o.y, g.o.z, g.len * grow)
+		pb[i] = Vector4(g.d.x, g.d.y, g.d.z, fade)
+		pr[i] = g.r * (0.5 + 0.5 * grow)
+	mat.set_shader_parameter("gust_a", pa)
+	mat.set_shader_parameter("gust_b", pb)
+	mat.set_shader_parameter("gust_r", pr)
+
 func _process(dt: float) -> void:
+	_update_gusts(dt)
 	var cam := get_viewport().get_camera_3d()
 	if cam:
 		mat.set_shader_parameter("cam_pos", cam.global_position)

@@ -25,21 +25,21 @@ void vertex() {
 	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	vec3 origin = MODEL_MATRIX[3].xyz;
 	float t = time_override >= 0.0 ? time_override : TIME;
+	float inst_h = length(MODEL_MATRIX[1].xyz);   // 擺幅跟草高成比例，矮草才不會晃得比自己還大
 	// 一陣陣的風從一個方向掃過，加上個別草叢的小抖動
 	float gust = sin(t * 0.6 + origin.x * 0.05 + origin.z * 0.03) * 0.5 + 0.7;
 	// 一道道風浪沿風向掃過草原（寬約 25 m、每秒走約 9 m）
 	float front = dot(origin.xz, wind_dir);
 	float wave = pow(sin(front * 0.24 - t * 2.1) * 0.5 + 0.5, 3.0);
-	gust += wave * 1.1;
+	gust += wave * 0.35;
 	gust_v = wave;
-	float wv = (sin(t * 1.9 + origin.x * 0.35 + origin.z * 0.21) * 0.6 + sin(t * 3.3 + origin.x * 0.8) * 0.2) * gust;
+	float wv = (sin(t * 1.3 + origin.x * 0.35 + origin.z * 0.21) * 0.7 + sin(t * 2.3 + origin.x * 0.8) * 0.15) * gust;
 	float hh = hgt * hgt;
-	vec3 off = vec3(1.0, 0.0, 0.6) * wv * hh * wind_strength * 2.0;
-	off.y = -abs(wv) * hh * wind_strength * 0.5;
-	off.xz += wind_dir * wave * hh * wind_strength * 1.6;   // 風浪經過時整片往下風處倒
+	vec3 off = vec3(1.0, 0.0, 0.6) * wv * hh * inst_h * wind_strength * 0.8;
+	off.y = -abs(wv) * hh * inst_h * wind_strength * 0.2;
+	off.xz += wind_dir * wave * hh * inst_h * wind_strength * 0.4;   // 風浪經過時整片往下風處倒
 	vec2 to_player = origin.xz - pushers[0].xz;
 	if (dot(to_player, to_player) < 64.0) {   // 離玩家 8 m 外跳過，幾十萬叢草不用每叢都算
-		float inst_h = length(MODEL_MATRIX[1].xyz);
 		for (int i = 0; i < 6; i++) {
 			if (pushers[i].w <= 0.0) { continue; }
 			vec2 d = origin.xz - pushers[i].xz;
@@ -63,7 +63,7 @@ void fragment() {
 	vec3 c = tex.rgb * mix(vec3(1.0), tint, tint_amount) * COLOR.rgb;
 	// 根部往地面色壓暗，看起來像長在土裡
 	c = mix(root_color, c, smoothstep(0.0, 0.45, hgt));
-	c *= 1.0 + gust_v * hgt * 0.22;   // 被風壓彎的草反光變亮，遠看像一道光掃過
+	c *= 1.0 + gust_v * hgt * 0.12;   // 被風壓彎的草反光變亮，遠看像一道光掃過
 	ALBEDO = c;
 	ALPHA = tex.a;
 	ALPHA_SCISSOR_THRESHOLD = alpha_cut;

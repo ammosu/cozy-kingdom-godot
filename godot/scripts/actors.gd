@@ -5,6 +5,9 @@ extends Node3D
 const HERO := "res://assets/chars/hero.glb"
 const VILLAGERS := ["res://assets/chars/villager_badger.glb", "res://assets/chars/villager_heron.glb"]
 const ELK := "res://assets/chars/mount_elk.glb"
+# 試放的敵人（KayKit Skeletons，CC0）：[檔名, x, z, 手上有沒有刀]
+const ENEMIES := [["Skeleton_Warrior", -22.0, 96.0, true], ["Skeleton_Minion", -26.0, 92.0, true], ["Skeleton_Minion", -18.5, 91.5, false]]
+const ENEMY_SCALE := 0.8   # 模型約 2.17 m，縮到跟村民差不多
 
 var layout: Dictionary
 var player: CharacterBody3D
@@ -18,6 +21,7 @@ var elk_anim: AnimationPlayer
 var mounted := false
 var villagers: Array = []
 var stall_vs: Array = []
+var enemies: Array = []
 var yaw := 0.0
 var pitch := -0.25
 var vel_y := 0.0
@@ -106,6 +110,7 @@ func setup(l: Dictionary) -> void:
 	layout = l
 	_make_player()
 	_make_villagers()
+	_make_enemies()
 	_make_elk()
 
 
@@ -279,7 +284,7 @@ func _resolve_hit() -> void:
 	var fwd := -player.global_basis.z
 	var at := player.global_position + Vector3.UP * 0.75
 	var struck := 0
-	for d in villagers + stall_vs:
+	for d in villagers + stall_vs + enemies:
 		var n: Node3D = d.node
 		var to: Vector3 = n.global_position - player.global_position
 		to.y = 0.0
@@ -295,10 +300,16 @@ func _resolve_hit() -> void:
 	var hard: bool = not hit.is_empty() and hit.normal.y < 0.6
 	if hard:
 		fx.impact(hit.position, hit.normal, false)
-	# 砍草：劍尖前方的地上噴草屑
+	# 砍草：揮過的扇形裡，草被削短、噴出草屑和花瓣（第三擊是直劈，範圍窄但遠）
 	var tip := player.global_position + fwd * 1.1
-	if player.is_on_floor() and not get_parent()._on_road_or_building(Vector2(tip.x, tip.z)):
-		fx.burst("blade", tip + Vector3.UP * 0.3, 9, 2.6, 3.2, 0.2, 0.7)
+	if player.is_on_floor():
+		var cut: Dictionary = nature.cut_cover(player.global_position, fwd, 2.2 if heavy else 1.9, 0.55 if heavy else -0.1)
+		for s: Vector3 in cut.blades:
+			fx.burst("blade", s + Vector3.UP * 0.3, 4, 2.4, 3.2, 0.2, 0.7)
+		for s: Vector3 in cut.petals:
+			fx.burst("petal", s + Vector3.UP * 0.25, 5, 1.8, 2.4, 0.13, 1.0)
+	# 每一揮都帶起風，把前方的霧吹開
+	get_parent().fog.gust(player.global_position + Vector3.UP * 1.1, fwd, heavy)
 	if struck > 0:
 		sfx.play("hit_heavy" if heavy else "hit_soft")
 	elif hard:
@@ -322,13 +333,16 @@ func _hit_npc(d: Dictionary, dir: Vector3, cfg: Dictionary) -> void:
 	var local: Vector3 = n.global_basis.inverse() * dir
 	d.hit_lean = Vector2(local.z, -local.x) * (0.1 + 0.02 * cfg.knock)
 	d.flash = 1.0
-	if d.react == null:
+	if d.has("hit_anim"):
+		d.anim.play(d.hit_anim, 0.05)   # 有真正的受擊動作就用它，卡肉結束才開始播
+	elif d.react == null:
 		var sk: Skeleton3D = n.find_children("*", "Skeleton3D", true, false)[0]
 		d.react = load("res://scripts/hit_react.gd").new()
 		sk.add_child(d.react)
 		d.react.bind(sk)
-	d.react.dir = dir
-	d.react.amount = clampf(cfg.knock / 9.5, 0.6, 1.0)
+	if d.react != null:
+		d.react.dir = dir
+		d.react.amount = clampf(cfg.knock / 9.5, 0.6, 1.0)
 	if d.anim.speed_scale > 0.0:
 		d.anim_speed = d.anim.speed_scale
 	d.anim.speed_scale = 0.0
@@ -397,7 +411,7 @@ func _update_feedback(dt: float, moved: float, running: bool) -> void:
 	# 跟村民、坐騎的軟碰撞：彼此推開，村民被撞會晃一下
 	var pp := player.global_position
 	var r := PUSH_R + (0.5 if mounted else 0.0)
-	for d in villagers + stall_vs:
+	for d in villagers + stall_vs + enemies:
 		_soft_collide(d, pp, r, want.length())
 	if not mounted and elk:
 		var to := Vector3(pp.x - elk.global_position.x, 0, pp.z - elk.global_position.z)
@@ -661,8 +675,38 @@ func _make_villagers() -> void:
 		stall_vs.append({"node": v, "anim": ap, "stun": 0.0, "hit_v": Vector3.ZERO, "hit_lean": Vector2.ZERO, "lean": Vector2.ZERO, "flash": 0.0, "flash_mat": null, "react": null, "meshes": [], "anim_speed": 1.0, "base": v.rotation.y, "base_pos": v.global_position, "bump": Vector3.ZERO, "bump_v": Vector3.ZERO, "spin": 0.0, "cd": 0.0})
 
 
+func _make_enemies() -> void:
+	for e in ENEMIES:
+		var v: Node3D = load("res://assets/chars/kaykit/%s.glb" % e[0]).instantiate()
+		add_child(v)
+		v.scale = Vector3.ONE * ENEMY_SCALE
+		var ap := find_anim(v)
+		set_loops(ap, ["Idle_Combat"])
+		ap.play("Idle_Combat")
+		ap.seek(enemies.size() * 0.37)
+		if e[3]:
+			var at := BoneAttachment3D.new()
+			at.bone_name = "handslot.r"
+			v.find_children("*", "Skeleton3D", true, false)[0].add_child(at)
+			at.add_child(load("res://assets/chars/kaykit/Skeleton_Blade.gltf").instantiate())
+		var p := Vector3(e[1], _ground_y(e[1], e[2]), e[2])
+		v.global_position = p
+		v.rotation.y = atan2(-p.x, 84.0 - p.z)    # 預設面向城門外的大道
+		enemies.append({"node": v, "anim": ap, "hit_anim": "Hit_A", "stun": 0.0, "hit_v": Vector3.ZERO, "hit_lean": Vector2.ZERO, "lean": Vector2.ZERO, "flash": 0.0, "flash_mat": null, "react": null, "meshes": [], "anim_speed": 1.0, "base": v.rotation.y, "base_pos": p, "bump": Vector3.ZERO, "bump_v": Vector3.ZERO, "spin": 0.0, "cd": 0.0})
+
+
 func _update_villagers(dt: float) -> void:
 	var pp := player.global_position
+	for d in enemies:
+		var n: Node3D = d.node
+		var target: float = d.base
+		if n.global_position.distance_to(pp) < 10.0:
+			var to := pp - n.global_position
+			target = atan2(to.x, to.z)
+		n.rotation.y = lerp_angle(n.rotation.y, target, 1.0 - exp(-4.0 * dt))
+		if not d.anim.is_playing() and d.stun <= 0.0:
+			d.anim.play("Idle_Combat", 0.2)
+		_npc_spring(d, dt)
 	for d in stall_vs:
 		var n: Node3D = d.node
 		var target: float = d.base

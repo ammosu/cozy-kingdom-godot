@@ -37,6 +37,48 @@ func orbit(to_yaw: float, s: float) -> void:
 		a.yaw = lerpf(y0, to_yaw, float(i + 1) / n)
 		await get_tree().physics_frame
 
+## 面向 ang 連砍三下，鏡頭停在 cam_yaw
+func combo(ang: float, cam_yaw: float) -> void:
+	a.yaw = cam_yaw
+	for swing in 3:
+		a.yaw = ang
+		a._start_attack(swing)
+		a.yaw = cam_yaw
+		await frames(2)
+		while a.attacking:
+			await get_tree().physics_frame
+
+## 互動測試片（REEL=interact tools/record.sh <名稱>）：打骷髏、揮風吹開低霧
+func interact(actors: Node3D, fog: Node) -> void:
+	a = actors
+	fade.color.a = 1.0
+	await frames(sec(1.5))
+	var n: Node3D = a.enemies[0].node
+	var to_e := atan2(1.0, 1.0)
+	a.pitch = -0.2
+	await tp(n.global_position.x + 1.0, n.global_position.z + 1.0, to_e + 1.5)
+	await frames(sec(1.0))
+	await set_fade(1.0, 0.0, 0.3)
+	await frames(sec(0.8))
+	await combo(to_e, to_e + 1.5)
+	await frames(sec(1.5))
+	for preset in [2, 1]:
+		await set_fade(0.0, 1.0, 0.25)
+		fog.apply(preset)
+		a.pitch = -0.3
+		await tp(0, 110, 3.14)
+		await frames(sec(4.0))
+		await set_fade(1.0, 0.0, 0.3)
+		await frames(sec(2.0))
+		await combo(3.14, 3.14)
+		await frames(sec(4.5))
+		a.yaw = 3.14 + 1.4
+		await frames(sec(1.0))
+		await combo(3.14, 3.14 + 1.4)
+		await frames(sec(4.5))
+	await set_fade(0.0, 1.0, 0.25)
+	get_tree().quit()
+
 func reel(actors: Node3D, fog: Node) -> void:
 	a = actors
 	fade.color.a = 1.0

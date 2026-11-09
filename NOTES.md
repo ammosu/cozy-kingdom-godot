@@ -57,4 +57,6 @@
 - **768 上色**：要 `HY_RES=768 HY_TEX=4096 HY_VAE_SLICE=1` 並暫停 voxcpm。`HY_TEX` 的實際輸出是一半，8 視角不開逐張解碼會記憶體不足。
 - **卡肉不要用 Engine.time_scale**：物理幀間隔會跟著拉長（0.08 倍時約 0.2 秒一幀），判斷寫在物理迴圈裡就停不準，全世界還一起卡。改成只停玩家和被打的人，用遊戲內 dt 倒數，錄影也會一致。
 - **音效**：`python3 tools/gen_sfx.py` 程序化合成到 `godot/assets/sfx/`，新增後要跑 `godot --headless --path godot --import`。
+- **揮劍吹霧**：遠處的霧在鏡頭 8 m 內會淡出，濃霧的遠景又主要是距離霧，吹開也看不出來，所以霧天多一層貼地低霧（`ground_density`），風吹的主要是這層。在邊緣補霧反而會像憑空冒出一團霧。
+- **敵人素材**：`godot/assets/chars/kaykit/` 是 KayKit Skeletons 1.0（CC0，授權檔在同目錄）。測試片：`REEL=interact tools/record.sh <名稱>`。
 - **相關筆記**：beach3d-eval 的 `PLAYBOOK.md` 有 Tripo 與 Blender 的其他筆記。
