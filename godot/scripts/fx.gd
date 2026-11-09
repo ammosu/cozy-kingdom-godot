@@ -14,7 +14,11 @@ var pools := {}
 var trail_mesh: ImmediateMesh
 var trail_pts: Array = []   # [hilt, tip, age]
 const TRAIL_LIFE := 0.16
+const TRAIL_SUB := 5
 var rng := RandomNumberGenerator.new()
+var streak_mesh: ImmediateMesh
+var streaks: Array = []     # {p, v, age, life, len, w, c}
+const STREAK_CAP := 64
 
 func _ready() -> void:
 	rng.seed = 21
@@ -64,6 +68,14 @@ func _ready() -> void:
 	tm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	ti.material_override = tm
 	add_child(ti)
+	streak_mesh = ImmediateMesh.new()
+	var si := MeshInstance3D.new()
+	si.mesh = streak_mesh
+	si.custom_aabb = ti.custom_aabb
+	si.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	si.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	si.material_override = tm
+	add_child(si)
 
 func _dot() -> Texture2D:
 	var g := Gradient.new()
@@ -89,6 +101,18 @@ func burst(kind: String, pos: Vector3, n: int, spread: float, up: float, size: f
 		var l := life * rng.randf_range(0.7, 1.2)
 		p.list.append({"p": pos + Vector3(rng.randf_range(-.08, .08), rng.randf_range(0, .1), rng.randf_range(-.08, .08)),
 			"v": v, "age": 0.0, "life": l, "size": size * rng.randf_range(0.75, 1.25), "c": tint})
+
+## 命中特效：一瞬間的白光＋往擊退方向噴的細長火花（不用圓點，圓點看起來像一堆小球）
+func impact(pos: Vector3, dir: Vector3, heavy: bool) -> void:
+	var size := 1.5 if heavy else 0.95
+	burst("spark", pos, 1, 0.0, 0.0, size, 0.1, Color(1.0, 0.95, 0.8))
+	burst("spark", pos, 1, 0.0, 0.0, size * 0.45, 0.07, Color(1, 1, 1))
+	for i in (20 if heavy else 11):
+		if streaks.size() >= STREAK_CAP:
+			streaks.pop_front()
+		var d := (dir + Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.35, 1.0), rng.randf_range(-1, 1)) * 0.85).normalized()
+		var sp := rng.randf_range(5.0, 12.0) * (1.3 if heavy else 1.0)
+		streaks.append({"p": pos, "v": d * sp, "age": 0.0, "life": rng.randf_range(0.12, 0.26), "len": rng.randf_range(0.18, 0.42), "w": rng.randf_range(0.012, 0.028), "c": Color(1.0, rng.randf_range(0.72, 0.92), 0.5)})
 
 func add_trail(hilt: Vector3, tip: Vector3) -> void:
 	trail_pts.append([hilt, tip, 0.0])
@@ -119,6 +143,36 @@ func _process(dt: float) -> void:
 			c.a *= (1.0 - f) * (0.55 if k == "dust" else 1.0)
 			mm.set_instance_color(i, c)
 	_draw_trail(dt)
+	_draw_streaks(dt)
+
+func _draw_streaks(dt: float) -> void:
+	streak_mesh.clear_surfaces()
+	var kept := []
+	for q in streaks:
+		q.age += dt
+		if q.age < q.life:
+			q.v.y -= 9.0 * dt
+			q.v *= exp(-3.5 * dt)
+			q.p += q.v * dt
+			kept.append(q)
+	streaks = kept
+	var cam := get_viewport().get_camera_3d()
+	if streaks.is_empty() or cam == null:
+		return
+	var eye := cam.global_position
+	streak_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for q in streaks:
+		var f: float = q.age / q.life
+		var tail: Vector3 = q.p - q.v.normalized() * q.len * (1.0 - f)
+		var side: Vector3 = (q.p - tail).cross(eye - q.p).normalized() * q.w
+		var c: Color = q.c
+		c.a = 1.0 - f
+		var off := c
+		off.a = 0.0
+		for v in [[q.p - side, c], [q.p + side, c], [tail, off]]:
+			streak_mesh.surface_set_color(v[1])
+			streak_mesh.surface_add_vertex(v[0])
+	streak_mesh.surface_end()
 
 func _draw_trail(dt: float) -> void:
 	trail_mesh.clear_surfaces()
@@ -130,11 +184,21 @@ func _draw_trail(dt: float) -> void:
 	trail_pts = kept
 	if trail_pts.size() < 2:
 		return
+	# 出招很快時取樣點很稀，直接連會變成有稜角的楔形，每段補成平滑曲線
 	trail_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
-	for s in trail_pts:
-		var a: float = pow(1.0 - s[2] / TRAIL_LIFE, 1.5)
-		trail_mesh.surface_set_color(Color(1.0, .95, .75, 0.0))
-		trail_mesh.surface_add_vertex(s[0].lerp(s[1], 0.25))
-		trail_mesh.surface_set_color(Color(1.0, .92, .7, a * 0.85))
-		trail_mesh.surface_add_vertex(s[1])
+	var n := trail_pts.size()
+	for i in n - 1:
+		var p0: Array = trail_pts[maxi(i - 1, 0)]
+		var p1: Array = trail_pts[i]
+		var p2: Array = trail_pts[i + 1]
+		var p3: Array = trail_pts[mini(i + 2, n - 1)]
+		for j in TRAIL_SUB:
+			var u := float(j) / TRAIL_SUB
+			var a: float = pow(1.0 - lerpf(p1[2], p2[2], u) / TRAIL_LIFE, 1.5)
+			var hilt: Vector3 = (p1[0] as Vector3).cubic_interpolate(p2[0], p0[0], p3[0], u)
+			var tip: Vector3 = (p1[1] as Vector3).cubic_interpolate(p2[1], p0[1], p3[1], u)
+			trail_mesh.surface_set_color(Color(1.0, .95, .75, 0.0))
+			trail_mesh.surface_add_vertex(hilt.lerp(tip, 0.25))
+			trail_mesh.surface_set_color(Color(1.0, .92, .7, a * 0.85))
+			trail_mesh.surface_add_vertex(tip)
 	trail_mesh.surface_end()

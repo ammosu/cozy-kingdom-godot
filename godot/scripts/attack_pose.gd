@@ -50,7 +50,12 @@ func sample() -> Array:
 		var a: Array = keys[i]
 		var b: Array = keys[i + 1]
 		if t <= b[0]:
-			var k: float = smoothstep(0.0, 1.0, (t - a[0]) / maxf(b[0] - a[0], 0.001))
+			var u: float = clampf((t - a[0]) / maxf(b[0] - a[0], 0.001), 0.0, 1.0)
+			var k: float = smoothstep(0.0, 1.0, u)
+			if i == 1:
+				k = u * u * u       # 出招：慢慢加速，碰到目標時最快
+			elif i == 2:
+				k = 1.0 - pow(1.0 - u, 2.0)   # 收招：衝力帶過去後減速
 			return [_mix(a[1], b[1], k), _mix(a[2], b[2], k), _mix(a[3], b[3], k), lerpf(a[4], b[4], k), lerpf(a[5], b[5], k)]
 	var last: Array = keys[-1]
 	return [last[1].normalized(), last[2].normalized(), last[3].normalized(), last[4], last[5]]

@@ -49,8 +49,14 @@ var attack_swing := 0
 var attack_queued := false
 var attack_hit := false
 var attack_rest := 0.0     # 收劍倒數
-var hit_stop := 0.0
-var hit_stop_until := 0
+var stop_left := 0.0       # 卡肉剩餘秒數：只停玩家和被打的人，世界照常動
+var attack_landed := false # 這一擊打中了，收掉往前踏的衝力
+var whoosh_done := false
+var cam_kick := Vector2.ZERO
+var cam_kick_v := Vector2.ZERO
+var fov_kick := 0.0
+var shake_t := 0.0
+var sfx: Node
 var hold_t := -1.0         # 截圖用：固定在某個揮劍時間點
 
 # 示範時間軸：[開始秒, 前進量, 側向量, 跑步, 鏡頭 yaw]
@@ -74,7 +80,12 @@ const GRAVITY := 22.0
 const WORLD_R := 300.0    # 可走範圍半徑；地形只到 ±360，山脊外就是虛空
 const FALL_Y := -40.0     # 掉到地形下方就送回出生點
 const JUMP_V := 8.0
-const ATTACK_TIME := 0.46
+# 每段的節奏：[總時間, 命中點(0..1), 卡肉秒數, 擊退, 鏡頭晃動, 鏡頭推力, 鏡頭內縮度]。前兩段快，第三段有明顯的蓄力和收尾
+const SWINGS := [
+	{"time": 0.40, "at": 0.42, "stop": 0.05, "knock": 5.0, "shake": 0.24, "kick": Vector2(1.2, 0.0), "fov": 0.9},
+	{"time": 0.40, "at": 0.42, "stop": 0.06, "knock": 6.0, "shake": 0.26, "kick": Vector2(-1.4, 0.0), "fov": 1.1},
+	{"time": 0.62, "at": 0.50, "stop": 0.11, "knock": 9.5, "shake": 0.36, "kick": Vector2(0.0, -2.6), "fov": 2.2},
+]
 const SHEATHE_AFTER := 2.5
 const PUSH_R := 0.75        # 玩家和村民的軟碰撞半徑（兩人圓心距）
 const SWORD := "res://assets/chars/sword.glb"
@@ -218,6 +229,8 @@ func _start_attack(swing: int) -> void:
 	attack_t = 0.0
 	attack_swing = swing
 	attack_hit = false
+	attack_landed = false
+	whoosh_done = false
 	attack_queued = false
 	attack_rest = SHEATHE_AFTER
 	_show_sword(true)
@@ -231,14 +244,22 @@ func _update_attack(dt: float) -> void:
 		pose.t = hold_t
 		pose.weight = 1.0
 		return
+	if stop_left > 0.0:
+		stop_left -= dt
+		player_anim.speed_scale = 0.0
+		return
 	if attacking:
-		attack_t += dt / ATTACK_TIME
+		var cfg: Dictionary = SWINGS[attack_swing]
+		attack_t += dt / cfg.time
 		pose.swing = attack_swing
+		if not whoosh_done and attack_t > cfg.at - 0.2:
+			whoosh_done = true
+			sfx.play("whoosh_heavy" if attack_swing == 2 else "whoosh")
 		pose.t = clampf(attack_t, 0.0, 1.0)
 		pose.weight = clampf(attack_t / 0.08, 0.0, 1.0) * clampf((1.0 - attack_t) / 0.18, 0.0, 1.0)
-		if attack_t > 0.22 and attack_t < 0.68:
+		if attack_t > cfg.at - 0.14 and attack_t < cfg.at + 0.26:   # 只畫真正揮砍的那段，蓄力不畫
 			fx.add_trail(sword_hilt.global_position, sword_tip.global_position)
-		if attack_t > 0.4 and not attack_hit:
+		if attack_t > cfg.at and not attack_hit:
 			attack_hit = true
 			_resolve_hit()
 		if attack_queued and attack_t > 0.62:
@@ -253,32 +274,73 @@ func _update_attack(dt: float) -> void:
 
 
 func _resolve_hit() -> void:
+	var cfg: Dictionary = SWINGS[attack_swing]
+	var heavy := attack_swing == 2
 	var fwd := -player.global_basis.z
 	var at := player.global_position + Vector3.UP * 0.75
-	var landed := false
+	var struck := 0
 	for d in villagers + stall_vs:
 		var n: Node3D = d.node
 		var to: Vector3 = n.global_position - player.global_position
 		to.y = 0.0
 		if to.length() < 1.9 and to.normalized().dot(fwd) > 0.3:
-			d.bump_v = to.normalized() * 5.5
-			d.spin = 1.0
-			fx.burst("spark", n.global_position + Vector3.UP * 0.8, 10, 3.5, 3.0, 0.16, 0.3, Color(1, .85, .5))
-			landed = true
-	# 砍到牆、房子、道具：火花
+			var dir := to.normalized()
+			_hit_npc(d, dir, cfg)
+			fx.impact(n.global_position + Vector3.UP * 0.85 - dir * 0.3, dir, heavy)
+			struck += 1
+	# 砍到牆、房子、道具：火花和金屬聲
 	var q := PhysicsRayQueryParameters3D.create(at, at + fwd * 1.5)
 	q.exclude = [player.get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
-	if not hit.is_empty() and hit.normal.y < 0.6:
-		fx.burst("spark", hit.position, 12, 3.0, 2.5, 0.13, 0.28, Color(1, .8, .45))
-		landed = true
+	var hard: bool = not hit.is_empty() and hit.normal.y < 0.6
+	if hard:
+		fx.impact(hit.position, hit.normal, false)
 	# 砍草：劍尖前方的地上噴草屑
 	var tip := player.global_position + fwd * 1.1
 	if player.is_on_floor() and not get_parent()._on_road_or_building(Vector2(tip.x, tip.z)):
 		fx.burst("blade", tip + Vector3.UP * 0.3, 9, 2.6, 3.2, 0.2, 0.7)
-	if landed:
-		shake = maxf(shake, 0.32)
-		hit_stop = 0.055
+	if struck > 0:
+		sfx.play("hit_heavy" if heavy else "hit_soft")
+	elif hard:
+		sfx.play("hit_hard")
+	if struck == 0 and not hard:
+		return
+	attack_landed = true
+	if heavy:
+		fx.burst("dust", tip + Vector3.UP * 0.05, 5, 2.8, 0.4, 0.3, 0.4)
+	_add_shake(cfg.shake)
+	cam_kick_v += cfg.kick
+	fov_kick = maxf(fov_kick, cfg.fov)
+	stop_left = cfg.stop
+
+
+## 命中：先定格抖動，卡肉結束才飛出去
+func _hit_npc(d: Dictionary, dir: Vector3, cfg: Dictionary) -> void:
+	var n: Node3D = d.node
+	d.stun = cfg.stop
+	d.hit_v = dir * cfg.knock
+	var local: Vector3 = n.global_basis.inverse() * dir
+	d.hit_lean = Vector2(local.z, -local.x) * (0.1 + 0.02 * cfg.knock)
+	d.flash = 1.0
+	if d.react == null:
+		var sk: Skeleton3D = n.find_children("*", "Skeleton3D", true, false)[0]
+		d.react = load("res://scripts/hit_react.gd").new()
+		sk.add_child(d.react)
+		d.react.bind(sk)
+	d.react.dir = dir
+	d.react.amount = clampf(cfg.knock / 9.5, 0.6, 1.0)
+	if d.anim.speed_scale > 0.0:
+		d.anim_speed = d.anim.speed_scale
+	d.anim.speed_scale = 0.0
+	if d.flash_mat == null:
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		d.flash_mat = m
+		d.meshes = n.find_children("*", "MeshInstance3D", true, false)
+	for mi in d.meshes:
+		mi.material_overlay = d.flash_mat
 
 
 func _add_shake(a: float) -> void:
@@ -381,12 +443,31 @@ func _soft_collide(d: Dictionary, pp: Vector3, r: float, speed: float) -> void:
 
 ## 村民被撞的位移彈簧與身體搖晃
 func _npc_spring(d: Dictionary, dt: float) -> void:
+	var n: Node3D = d.node
+	if d.flash > 0.0:
+		d.flash = move_toward(d.flash, 0.0, dt / 0.11)
+		d.flash_mat.albedo_color = Color(1.0, 0.95, 0.85, d.flash * 0.32)
+		if d.flash <= 0.0:
+			for mi in d.meshes:
+				mi.material_overlay = null
+	if d.stun > 0.0:
+		d.stun -= dt
+		n.position = d.base_pos + d.bump + n.global_basis.x * sin(d.stun * 190.0) * 0.022
+		if d.stun <= 0.0:
+			d.bump_v = d.hit_v
+			d.spin = 1.0
+			d.lean = d.hit_lean
+			d.anim.speed_scale = d.anim_speed
+		return
+	if d.react != null:
+		d.react.amount *= exp(-5.0 * dt)
 	d.bump_v += (-d.bump * 42.0 - d.bump_v * 7.0) * dt
 	d.bump += d.bump_v * dt
 	d.spin = move_toward(d.spin, 0.0, dt * 1.4)
-	var n: Node3D = d.node
+	d.lean *= exp(-5.0 * dt)
 	n.position = d.base_pos + d.bump
-	n.rotation.z = sin(d.spin * 18.0) * d.spin * 0.28
+	n.rotation.x = d.lean.x
+	n.rotation.z = sin(d.spin * 18.0) * d.spin * 0.28 + d.lean.y
 
 
 func _unhandled_input(e: InputEvent) -> void:
@@ -470,10 +551,13 @@ func _physics_process(dt: float) -> void:
 		speed *= 0.3
 	player.velocity.x = dir.x * speed
 	player.velocity.z = dir.z * speed
-	if attacking and attack_t > 0.25 and attack_t < 0.5:
+	if attacking and not attack_landed and attack_t > 0.25 and attack_t < 0.5:
 		var lunge := -player.global_basis.z * 3.2
 		player.velocity.x += lunge.x
 		player.velocity.z += lunge.z
+	if stop_left > 0.0:
+		player.velocity.x = 0.0
+		player.velocity.z = 0.0
 	var before := player.global_position
 	if player.is_on_floor():
 		vel_y = -1.0
@@ -503,20 +587,18 @@ func _physics_process(dt: float) -> void:
 	# 鏡頭晃動（平方衰減，小晃動幾乎察覺不到）
 	shake = move_toward(shake, 0.0, dt * 1.6)
 	var a := shake * shake * 0.55
-	a *= smoothstep(0.35, 1.0, spring.get_hit_length() / spring.spring_length)   # 鏡頭被擠近地面或牆時不晃，不然會晃進去
-	if a > 0.001:
-		a = min(a, _camera_clearance() - 0.3)
-		a = maxf(a, 0.0)
-	var tt := Time.get_ticks_msec() * 0.001
-	camera.h_offset = sin(tt * 47.0) * a
-	camera.v_offset = sin(tt * 61.0 + 1.3) * a
-	# 打擊停頓用真實時間算（dt 會被 time_scale 縮小）
-	if hit_stop > 0.0:
-		hit_stop_until = Time.get_ticks_msec() + int(hit_stop * 1000.0)
-		hit_stop = 0.0
-		Engine.time_scale = 0.08
-	elif Engine.time_scale < 1.0 and Time.get_ticks_msec() >= hit_stop_until:
-		Engine.time_scale = 1.0
+	cam_kick_v += (-cam_kick * 260.0 - cam_kick_v * 22.0) * dt
+	cam_kick += cam_kick_v * dt
+	fov_kick *= exp(-14.0 * dt)
+	camera.fov = 60.0 - fov_kick
+	# 鏡頭被擠近地面或牆時不晃，不然會晃進去
+	var room := smoothstep(0.35, 1.0, spring.get_hit_length() / spring.spring_length)
+	var total := (a + cam_kick.length()) * room
+	if total > 0.001:
+		room *= minf(1.0, maxf(_camera_clearance() - 0.3, 0.0) / total)
+	shake_t += dt
+	camera.h_offset = (sin(shake_t * 47.0) * a + cam_kick.x) * room
+	camera.v_offset = (sin(shake_t * 61.0 + 1.3) * a + cam_kick.y) * room
 
 
 func _update_player_anim(moving: bool, running: bool) -> void:
@@ -560,7 +642,7 @@ func _make_villagers() -> void:
 		var t := rng.randf()
 		villagers.append({"node": v, "anim": ap, "a": a + side, "b": b + side, "t": t, "dir": 1 if rng.randf() < 0.5 else -1,
 			"speed": rng.randf_range(0.9, 1.3), "len": a.distance_to(b), "look": 0.0,
-			"base_pos": Vector3.ZERO, "bump": Vector3.ZERO, "bump_v": Vector3.ZERO, "spin": 0.0, "cd": 0.0})
+			"base_pos": Vector3.ZERO, "bump": Vector3.ZERO, "bump_v": Vector3.ZERO, "spin": 0.0, "cd": 0.0, "stun": 0.0, "hit_v": Vector3.ZERO, "hit_lean": Vector2.ZERO, "lean": Vector2.ZERO, "flash": 0.0, "flash_mat": null, "react": null, "meshes": [], "anim_speed": 1.0})
 	# 市集固定攤販（站著）
 	var stalls: Array = layout.stalls
 	for i in stalls.size():
@@ -576,7 +658,7 @@ func _make_villagers() -> void:
 		v.global_position = s + out * 1.2
 		var to_plaza := plaza - v.global_position
 		v.rotation.y = atan2(to_plaza.x, to_plaza.z)  # 面向廣場（模型正面是 +Z）
-		stall_vs.append({"node": v, "base": v.rotation.y, "base_pos": v.global_position, "bump": Vector3.ZERO, "bump_v": Vector3.ZERO, "spin": 0.0, "cd": 0.0})
+		stall_vs.append({"node": v, "anim": ap, "stun": 0.0, "hit_v": Vector3.ZERO, "hit_lean": Vector2.ZERO, "lean": Vector2.ZERO, "flash": 0.0, "flash_mat": null, "react": null, "meshes": [], "anim_speed": 1.0, "base": v.rotation.y, "base_pos": v.global_position, "bump": Vector3.ZERO, "bump_v": Vector3.ZERO, "spin": 0.0, "cd": 0.0})
 
 
 func _update_villagers(dt: float) -> void:

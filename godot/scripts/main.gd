@@ -315,6 +315,8 @@ func _spawn_actors() -> void:
 		a.fx = load("res://scripts/fx.gd").new()
 		a.fx.name = "Fx"
 		add_child(a.fx)
+		a.sfx = load("res://scripts/sfx.gd").new()
+		add_child(a.sfx)
 		a.nature = nature
 		a.setup(layout)
 		fog.target = a.player
