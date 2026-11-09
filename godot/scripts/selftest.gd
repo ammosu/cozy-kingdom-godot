@@ -111,16 +111,49 @@ func run(actors: Node3D, nat: Node3D) -> void:
 	check("劍在手上", a.sword_hand.visible and not a.sword_back.visible)
 	await frames(180)
 	check("收回背上", a.sword_back.visible and not a.sword_hand.visible)
-	# 9. 砍村民：打擊停頓會結束
-	from = n.global_position + n.global_basis.z * 1.4
-	ang = atan2(from.x - n.global_position.x, from.z - n.global_position.z)
-	await tp(from.x, from.z, ang)
-	d.spin = 0.0
+	# 9. 打擊感：卡肉只停當事人、第三擊最重、音效和鏡頭都有反應
+	var stops := []
+	for swing in [0, 2]:
+		from = n.global_position + n.global_basis.z * 1.4
+		ang = atan2(from.x - n.global_position.x, from.z - n.global_position.z)
+		await tp(from.x, from.z, ang)
+		a._start_attack(swing)
+		var before_soft: int = a.sfx.played.hit_soft + a.sfx.played.hit_heavy
+		while a.stop_left <= 0.0 and a.attacking:
+			await get_tree().physics_frame
+		check("砍到村民觸發卡肉", a.stop_left > 0.0, swing)
+		check("命中音效", a.sfx.played.hit_soft + a.sfx.played.hit_heavy == before_soft + 1)
+		check("命中後鏡頭內縮", a.camera.fov < 59.5, a.camera.fov)
+		var t0: float = a.attack_t
+		check("受擊有骨架動作", d.react != null and d.react.amount > 0.5 and not d.react.ids.values().has(-1), d.react.ids if d.react else null)
+		var n_frames := 0
+		while a.stop_left > 0.0:
+			await get_tree().physics_frame
+			n_frames += 1
+		stops.append(n_frames)
+		check("卡肉中揮劍定住", is_equal_approx(a.attack_t, t0), a.attack_t)
+		check("世界沒有被減速", is_equal_approx(Engine.time_scale, 1.0), Engine.time_scale)
+		await frames(3)
+		check("卡肉後被擊退", d.bump.length() > 0.01 or d.bump_v.length() > 0.1, d.bump)
+		check("卡肉後揮劍繼續", a.attack_t > t0)
+		while a.attacking:
+			await get_tree().physics_frame
+		await frames(45)
+	check("第三擊卡肉較長", stops[1] > stops[0] and stops[0] >= 2 and stops[1] <= 10, stops)
+	check("閃白結束", d.flash <= 0.0)
+	check("受擊動作收回", d.react.amount < 0.05, d.react.amount)
+	check("鏡頭視野回復", absf(a.camera.fov - 60.0) < 0.1, a.camera.fov)
+	# 揮空：有風聲，沒有卡肉
+	await tp(24, 90, 0.0)
+	var w: int = a.sfx.played.whoosh
+	var h0: int = a.sfx.played.hit_hard + a.sfx.played.hit_soft
 	a._start_attack(0)
-	await frames(40)
-	check("砍到村民有反應", d.spin > 0.0 or d.bump.length() > 0.001, d.spin)
-	await get_tree().create_timer(0.5, true, false, true).timeout
-	check("打擊停頓有恢復", is_equal_approx(Engine.time_scale, 1.0), Engine.time_scale)
+	var any_stop := false
+	while a.attacking:
+		await get_tree().physics_frame
+		any_stop = any_stop or a.stop_left > 0.0
+	check("揮空有風聲", a.sfx.played.whoosh == w + 1)
+	check("揮空不卡肉", not any_stop, "%d %s" % [a.sfx.played.hit_hard + a.sfx.played.hit_soft - h0, a.player.global_position])
 	# 10. 騎乘時不能揮劍的情況與上下坐騎
 	await tp(0, 68)
 	a._toggle_mount()
