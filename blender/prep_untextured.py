@@ -21,7 +21,8 @@ bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT"); 
 bpy.ops.mesh.normals_make_consistent(inside=False)  # some Hunyuan meshes come out with inverted winding
 bpy.ops.object.mode_set(mode="OBJECT")
 tris = sum(len(p.vertices) - 2 for p in ob.data.polygons)
-if tris > TARGET * 40:   # 破碎網格（大量非流形邊）減面會卡住 → 先體素重建成封閉表面
+# 破碎網格（大量非流形邊）直接減面會卡在幾十萬面，判斷看原始面數，不能跟目標面數綁在一起
+if tris > 1200000:
     r = ob.modifiers.new("v", "REMESH"); r.mode = "VOXEL"; r.voxel_size = max(ob.dimensions) / 400; bpy.ops.object.modifier_apply(modifier="v")
     tris = sum(len(p.vertices) - 2 for p in ob.data.polygons); print("REMESH tris", tris)
 if tris > TARGET:

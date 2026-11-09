@@ -9,6 +9,8 @@ const SPECIES := {
 }
 var foliage_mat: ShaderMaterial
 var card_mat: ShaderMaterial
+var needle_mat: ShaderMaterial
+const NEEDLE_LUM := 0.135
 var bark_mat: StandardMaterial3D
 var layout: Dictionary
 
@@ -33,6 +35,10 @@ func setup(lay: Dictionary) -> void:
 		card_mat.shader = load("res://shaders/foliage_card.gdshader")
 		card_mat.set_shader_parameter("leaf_noise", nt)
 		card_mat.set_shader_parameter("leaf_tex", load("res://assets/sprites/leaf_cluster.png"))
+		needle_mat = card_mat.duplicate()
+		needle_mat.set_shader_parameter("leaf_tex", load("res://assets/sprites/pine_branch.png"))
+		needle_mat.set_shader_parameter("tex_lum", NEEDLE_LUM)
+		needle_mat.set_shader_parameter("sway_height", 14.0)
 	bark_mat = StandardMaterial3D.new()
 	bark_mat.vertex_color_use_as_albedo = true
 	bark_mat.roughness = 0.95
@@ -41,15 +47,28 @@ func setup(lay: Dictionary) -> void:
 		bark_mat.normal_texture = load("res://assets/tex/wood_planks_n.png")
 		bark_mat.uv1_triplanar = true
 		bark_mat.uv1_scale = Vector3(0.6, 0.15, 0.6)
+		bark_mat.albedo_texture = load("res://assets/tex/wood_planks.png")
+		bark_mat.albedo_color = Color(1.0, 0.9, 0.78)
 	_plant_trees()
 	_plant_bushes()
+	_plant_far_forest()
 
 func set_time(t: float) -> void:
 	foliage_mat.set_shader_parameter("time_override", t)
 	if card_mat:
 		card_mat.set_shader_parameter("time_override", t)
+		needle_mat.set_shader_parameter("time_override", t)
 	for m in cover_mats:
 		m.set_shader_parameter("time_override", t)
+
+## 每幀由 actors 呼叫。points：最多 6 個 Vector4(x, y, z, 半徑)；第 0 個是玩家
+func set_pushers(points: PackedVector4Array, waist: Vector3, r: float) -> void:
+	for m in cover_mats:
+		m.set_shader_parameter("pushers", points)
+	foliage_mat.set_shader_parameter("pusher", Vector4(waist.x, waist.y, waist.z, r))
+	if card_mat:
+		card_mat.set_shader_parameter("pusher", Vector4(waist.x, waist.y, waist.z, r))
+		needle_mat.set_shader_parameter("pusher", Vector4(waist.x, waist.y, waist.z, r))
 
 func _parts(file: String) -> Dictionary:
 	var scene: Node = load("res://assets/nature/%s.glb" % file).instantiate()
@@ -91,6 +110,8 @@ func _plant(groups: Dictionary, shadow: bool, vis_end := 0.0) -> void:
 			_multimesh(parts["Leaves"], foliage_mat, groups[file], shadow, vis_end)
 		if parts.has("LeafCards") and card_mat:
 			_multimesh(parts["LeafCards"], card_mat, groups[file], shadow, vis_end)
+		if parts.has("NeedleCards") and needle_mat:
+			_multimesh(parts["NeedleCards"], needle_mat, groups[file], shadow, vis_end)
 
 func _plant_trees() -> void:
 	var rng := RandomNumberGenerator.new()
@@ -106,6 +127,63 @@ func _plant_trees() -> void:
 		var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.9, 1.1), s))
 		groups.get_or_add(file, []).append(Transform3D(b, pos - Vector3(0, 0.1, 0)))
 	_plant(groups, true)
+
+## 遠山的樹林：交叉面片的遠景樹，一片片聚成林相，讓山坡不再是一塊平滑的綠幕
+func _plant_far_forest() -> void:
+	var meta: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://assets/sprites/sprites.json"))
+	var space := get_world_3d().direct_space_state
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77
+	var forest := FastNoiseLite.new(); forest.seed = 12; forest.frequency = 0.014; forest.fractal_octaves = 3
+	var groups := {"far_pine": [], "far_oak": []}
+	var n := 0
+	var attempts := 0
+	while n < 15000 and attempts < 110000:
+		attempts += 1
+		var r := sqrt(rng.randf()) * 300.0 + 145.0
+		var a := rng.randf() * TAU
+		var p := Vector2(cos(a), sin(a)) * r
+		if forest.get_noise_2dv(p) < -0.22:   # 林與林之間留空地
+			continue
+		if abs(p.x) < 16.0 and p.y > 0.0:      # 南門大道的視線通廊
+			continue
+		var q := PhysicsRayQueryParameters3D.create(Vector3(p.x, 400, p.y), Vector3(p.x, -60, p.y))
+		var hit := space.intersect_ray(q)
+		if hit.is_empty() or hit.normal.y < 0.6:
+			continue
+		var kind := "far_pine" if rng.randf() < clampf((hit.position.y - 8.0) / 40.0, 0.35, 0.92) else "far_oak"
+		var s := rng.randf_range(10.0, 17.0) * (1.0 if kind == "far_pine" else 0.75)
+		var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s))
+		var v := rng.randf_range(0.82, 1.1)
+		groups[kind].append([Transform3D(b, hit.position - Vector3(0, 0.6, 0)), Color(v, v, v)])
+		n += 1
+	var pnoise := NoiseTexture2D.new()
+	var pf := FastNoiseLite.new(); pf.frequency = 0.02
+	pnoise.noise = pf; pnoise.seamless = true; pnoise.width = 64; pnoise.height = 64
+	for kind in groups:
+		var xs: Array = groups[kind]
+		var mat := ShaderMaterial.new()
+		mat.shader = load("res://shaders/grass_card.gdshader")
+		mat.set_shader_parameter("albedo_tex", load("res://assets/sprites/%s.png" % kind))
+		mat.set_shader_parameter("patch_noise", pnoise)
+		mat.set_shader_parameter("tint_amount", 0.0)
+		mat.set_shader_parameter("wind_strength", 0.0)
+		mat.set_shader_parameter("root_color", Color(0.3, 0.42, 0.28))
+		var mesh := _card_mesh(meta[kind], 2)
+		mesh.surface_set_material(0, mat)
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.mesh = mesh
+		mm.instance_count = xs.size()
+		for i in xs.size():
+			mm.set_instance_transform(i, xs[i][0])
+			mm.set_instance_color(i, xs[i][1])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mmi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+		add_child(mmi)
 
 func _terrain_hit(space: PhysicsDirectSpaceState3D, x: float, z: float) -> Dictionary:
 	var q := PhysicsRayQueryParameters3D.create(Vector3(x, 80, z), Vector3(x, -30, z))
@@ -213,10 +291,12 @@ func plant_ground_cover(main: Node) -> void:
 		var a := rng.randf() * TAU
 		var p := Vector2(cos(a) * r, sin(a) * r)
 		var d := dens.get_noise_2dv(p) * 0.5 + 0.5
-		var far := clampf((r - 105.0) / 45.0, 0.0, 1.0)   # 105 m 外逐漸稀疏（玩家多半在城附近）
-		if rng.randf() > (0.25 + 0.75 * d) * (1.0 - far * 0.6):   # 疏密不均：有濃密處也有稀疏處
+		if rng.randf() < 0.72 * (1.0 - smoothstep(0.36, 0.56, d)):   # 留空地，邊緣漸變，不會一刀切
 			continue
-		if main._on_road_or_building(p):
+		var far := clampf((r - 105.0) / 45.0, 0.0, 1.0)   # 105 m 外逐漸稀疏（玩家多半在城附近）
+		if rng.randf() > (0.12 + 0.88 * d * d) * (1.0 - far * 0.6):   # 疏密不均：有濃密處也有稀疏處
+			continue
+		if main._on_road_or_building(p, -0.2):   # 草可以稍微長進路緣，路邊才不會是一刀切
 			continue
 		var hit := _terrain_hit(space, p.x, p.y)
 		if hit.is_empty() or hit.normal.y < 0.8:
@@ -234,7 +314,7 @@ func plant_ground_cover(main: Node) -> void:
 			kind = "fern"
 		elif outside and d > 0.55 and u < 0.25:
 			kind = "grass_tall"
-		elif u > (0.93 if outside else 0.97):
+		elif u > (0.955 if outside else 0.98):
 			# 花一片一片長：同一區以同一種花為主
 			kind = flowers[int(kn * 3.99)] if rng.randf() < 0.8 else flowers[rng.randi() % 4]
 		var hr: Vector2 = COVER[kind][0] if outside else COVER[kind][1]

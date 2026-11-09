@@ -18,3 +18,11 @@ assets3d/*/*.glb
 assets3d/*/ref_*.png
 assets3d/*/codex.log
 assets3d/*/paint.log
+
+# 評分截圖與除錯截圖（評分結果保留在 eval/rNN.json）
+eval/r[0-9][0-9]/
+shots/dbg_*
+shots/test_*
+shots/wind_*
+shots/fog[12]_*
+shots/fnt_*

@@ -21,6 +21,9 @@
    - `tools/hy_asset.sh <名稱>...`：Hunyuan 2.0 MV 出形狀（ComfyUI 要開著）→ `blender/prep_untextured.py` 減面到 3 萬面 → Hunyuan 2.1 Paint 用四張圖上色 → `assets3d/<名稱>/<名稱>.glb`。每個約 2 分鐘。可加 `SHAPE_ONLY=1`、`PAINT_ONLY=1`、`SEED=`。
    - 成品複製到 `godot/assets/props/`。`blender -b -P blender/gen_kingdom.py -- --seed 7 --houses 120 --hy 1` 產生不含這些建築的 `kingdom_hy.glb`，由 `props.gd` 依配置擺放。設 `KINGDOM=proc` 可切回程序化版。
    - **授權**：Hunyuan3D 2.1 Paint 模型限非商業用途。
+   - 城門樓與主堡入口有修補腳本：重新生成後要跑 `blender -b -P blender/fix_gatehouse.py`、`blender/fix_keep.py`（會輸出到 `godot/assets/props/`）。
+5d. **分區評分**：`tools/eval_round.sh <輪次>` 固定鏡頭拍 14 個區塊，Codex 依 `eval/rubric.md` 評分，結果在 `eval/rNN.json`。分數有 ±0.3 的波動。
+5e. **自我測試**：`SELFTEST=1 godot --path godot --windowed --resolution 1600x900` 實際跑物理（穿門洞、撞牆、撞村民、連擊），印 PASS/FAIL。
 6. **截圖**：`[REL=1] tools/shot.sh <名稱> "x,y,z" "x,y,z" [frames]`
    - `REL=1` 時 y 代表離地高度。
 7. **示範影片**：`tools/record.sh <名稱>` → `video/<名稱>.mp4`
@@ -45,4 +48,8 @@
 - **扁長物件細節糊掉**：10 m 長的城牆，城垛在 Hunyuan 裡解析度不夠，糊成一團。模組化的物件要做短一點、接近正方形。
 - **隱藏碰撞擋到貼地射線**：城牆用 Blender 的隱藏方塊做碰撞，擺牆段時往下打的射線要跳過 `HiddenCol*`，不然整段牆會浮在 7 m 高。
 - **zsh 不拆變數**：`for n in $names` 在 zsh 只跑一次，批次腳本要用 bash 跑。
+- **Hunyuan 重建不了細件**：細窗格、斜撐、雕像、藤蔓會變成破洞和融化感。Codex 設計圖改成粗獷大塊面（`SHEET_EXTRA`）後，民房評分從 4.0 升到 6.5。
+- **陰影梳齒**：屋簷下規律的鋸齒是陰影貼圖解析度不足，要調 `directional_shadow_split_*`、`light_angular_distance = 0`，調 bias 沒用。
+- **Paint 的記憶體**：voxcpm-api 開著時 8 視角／512 可以跑，768 會記憶體不足。殘留的上色程序也會讓後面的批次全部失敗，批次中斷後要確認沒有舊程序。
+- **減面門檻**：體素重建的判斷要看原始面數（>120 萬），綁目標面數的話，目標調高就不會觸發。
 - **相關筆記**：beach3d-eval 的 `PLAYBOOK.md` 有 Tripo 與 Blender 的其他筆記。

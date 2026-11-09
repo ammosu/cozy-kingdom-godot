@@ -16,6 +16,7 @@ Rules:
 1. Exactly four views in one row, left to right: FRONT, LEFT SIDE (the asset's front faces the left edge of the image), BACK, RIGHT SIDE (front faces the right edge). The FRONT is the side with the door / counter / main opening.
 2. Orthographic, no perspective, eye-level, identical scale in all views, all bottoms on the same ground line, each view centred in its quarter with clear empty space between views. The four views must be consistent with each other (same details on the same sides).
 3. Solid closed shapes, chunky readable details, no tiny floating parts, no characters, no ground plane, no cast shadow, no text or labels.
+${SHEET_EXTRA:-}
 4. The background must be truly transparent alpha (PNG). No white background, no checkerboard, no background colour at all.
 Image size: wide landscape (e.g. 2048x768).
 
