@@ -99,13 +99,13 @@ def shade_of(p, d, crown_c, crown_r, n2, col_dark, col_mid, col_light):
     return mix(col_dark, col_mid, shade * 1.4) if shade < 0.7 else mix(col_mid, col_light, (shade - 0.7) / 0.4)
 
 
-def leaf_cards(cards, center, radius, crown_c, crown_r, rng, cols, n=34, size=0.55, squash=1.0):
+def leaf_cards(cards, center, radius, crown_c, crown_r, rng, cols, n=130, size=0.36, squash=1.0):
     """在樹葉團表面貼葉簇卡片（透明貼圖）：卡片朝外、沿法線隨機轉，打破圓球輪廓。"""
     for _ in range(n):
         d = Vector((rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1))).normalized()
         if d.z < -0.55 and rng.random() < 0.6:
             continue   # 底部少放
-        p = center + Vector((d.x, d.y, d.z * squash)) * radius * rng.uniform(0.85, 1.08)
+        p = center + Vector((d.x, d.y, d.z * squash)) * radius * rng.uniform(0.62, 1.12)   # 卡片分布在整個厚度，看不到內核
         rel = p - crown_c
         sph = rel.normalized() if rel.length > 1e-4 else d
         nrm = (sph * 0.7 + d * 0.3).normalized()
@@ -153,6 +153,10 @@ def blob(part, center, radius, crown_c, crown_r, rng, col_dark, col_mid, col_lig
 BARK_DARK, BARK_LIGHT = srgb("#3d2a1c"), srgb("#7a5a3e")
 
 
+def core(c):
+    return tuple(x * 0.42 for x in c[:3]) + (1.0,)
+
+
 def bark_col(t, ang):
     k = 0.5 + 0.5 * math.sin(ang * 3 + t * 7)
     return mix(BARK_DARK, BARK_LIGHT, 0.35 + 0.4 * k * (0.4 + 0.6 * t))
@@ -181,7 +185,7 @@ def oak(name, seed, height=7.5, palette=None):
     for k in range(n_cl):
         a = k / n_cl * math.tau + rng.uniform(-0.3, 0.3)
         el = rng.uniform(-0.15, 0.9)
-        r = crown_r * rng.uniform(0.45, 0.75)
+        r = crown_r * rng.uniform(0.35, 0.95)   # 枝團遠近不一，輪廓不是一顆圓球
         c = crown_c + Vector((math.cos(a) * r * math.cos(el), math.sin(a) * r * math.cos(el), r * math.sin(el) * 0.8))
         centers.append(c)
     centers.append(crown_c + Vector((0, 0, crown_r * 0.55)))
@@ -190,51 +194,72 @@ def oak(name, seed, height=7.5, palette=None):
         sp = [st.lerp(c, t) + Vector((0, 0, math.sin(t * math.pi) * 0.4)) for t in (0, 0.35, 0.7, 0.95)]
         tube(trunk, sp, [radii[-1] * 0.7, radii[-1] * 0.5, radii[-1] * 0.3, 0.05], bark_col, sides=6)
     for c in centers:
-        rad = crown_r * rng.uniform(0.42, 0.6)
-        blob(leaves, c, rad * 0.88, crown_c, crown_r, rng, dark, mid, light)
+        rad = crown_r * rng.uniform(0.3, 0.62)
+        # 內核縮小、壓暗：只當葉片縫隙裡的陰影，不再看得出是一顆綠球
+        blob(leaves, c, rad * 0.62, crown_c, crown_r, rng, core(dark), core(dark), core(mid))
         leaf_cards(cards, c, rad, crown_c, crown_r, rng, (dark, mid, light))
     trunk.build("Bark"); leaves.build("Foliage"); cards.build("LeafCard")
     export(name)
 
 
 def pine(name, seed, height=10.0):
+    """雲杉：細樹幹＋深色窄內核，外面是一圈圈下垂的針葉枝卡片（Codex 的 pine_branch 透明貼圖）。"""
     rng = random.Random(seed)
     reset()
-    dark, mid, light = srgb("#163a24"), srgb("#2f6a3a"), srgb("#7fae5c")
-    trunk, leaves = Part("Trunk"), Part("Leaves")
-    spine = [Vector((0, 0, -0.3 + (height * 0.9 + 0.3) * i / 6)) for i in range(7)]
-    tube(trunk, spine, [lerp(0.35, 0.05, i / 6) * height / 10 for i in range(7)], bark_col)
-    tiers = rng.randint(6, 8)
-    crown_c = Vector((0, 0, height * 0.55)); crown_r = height * 0.5
-    for k in range(tiers):
-        t = k / (tiers - 1)
-        z0 = lerp(height * 0.22, height * 0.88, t)
-        rad = lerp(height * 0.3, height * 0.07, t) * rng.uniform(0.9, 1.1)
-        drop = rad * 0.55
-        spokes = 14
-        center = trunk.v and Vector((0, 0, z0 + rad * 0.55))
-        tip = leaves.add_vert(Vector((0, 0, z0 + rad * 0.6)), mix(mid, light, 0.6 + 0.4 * t), (0, 0, 1))
-        rim, mid_ring = [], []
+    dark, mid, light = srgb("#16402c"), srgb("#2f7044"), srgb("#86b86a")
+    trunk, leaves, cards = Part("Trunk"), Part("Leaves"), Part("NeedleCards")
+    spine = [Vector((0, 0, -0.3 + (height * 0.86 + 0.3) * i / 6)) for i in range(7)]   # 樹幹比枝葉矮，頂端才不會露出一截
+    tube(trunk, spine, [lerp(0.34, 0.03, i / 6) * height / 10 for i in range(7)], bark_col)
+    z_lo, z_hi = height * 0.14, height * 0.98
+    prof = lambda z: max(1.0 - (z - z_lo) / (z_hi - z_lo), 0.0) ** 0.85 * height * 0.31 + 0.12
+    # 內核：暗色窄錐，擋住從枝葉縫隙穿過去的視線
+    nside, rings = 10, []
+    for i in range(8):
+        z = lerp(z_lo + 0.3, z_hi - 0.2, i / 7)
+        r = prof(z) * 0.2
+        ring = []
+        for k in range(nside):
+            a = k / nside * math.tau
+            n = Vector((math.cos(a), math.sin(a), 0.5))
+            ring.append(leaves.add_vert(Vector((math.cos(a) * r, math.sin(a) * r, z)), core(mix(dark, mid, 0.3 + 0.5 * i / 7)), n))
+        rings.append(ring)
+    for i in range(7):
+        for k in range(nside):
+            leaves.f.append((rings[i][k], rings[i][(k + 1) % nside], rings[i + 1][(k + 1) % nside], rings[i + 1][k]))
+    whorls = int(height * 5.0)
+    for w in range(whorls):
+        t = w / (whorls - 1)
+        z = lerp(z_lo, z_hi, t) + rng.uniform(-0.06, 0.06)
+        n = max(6, int(lerp(17, 8, t)))
         rot = rng.uniform(0, math.tau)
-        for s in range(spokes * 2):
-            a = rot + s / (spokes * 2) * math.tau
-            long = s % 2 == 0
-            rr = rad * (rng.uniform(0.95, 1.12) if long else 0.72)
-            dz = -drop * (1.0 if long else 0.78) + rng.uniform(-0.08, 0.08) * rad
-            p = Vector((math.cos(a) * rr, math.sin(a) * rr, z0 + dz))
-            n = Vector((math.cos(a), math.sin(a), 1.1))
-            rim.append(leaves.add_vert(p, mix(dark, mid, 0.25 + 0.5 * t + (0.15 if long else -0.1)), n))
-            pm = Vector((math.cos(a) * rr * 0.5, math.sin(a) * rr * 0.5, z0 + rad * 0.25 + dz * 0.3))
-            mid_ring.append(leaves.add_vert(pm, mix(mid, light, 0.2 + 0.5 * t), n * 0.6 + Vector((0, 0, 0.6))))
-        m = len(rim)
-        for s in range(m):
-            leaves.f.append((tip, mid_ring[s], mid_ring[(s + 1) % m]))
-            leaves.f.append((mid_ring[s], rim[s], rim[(s + 1) % m], mid_ring[(s + 1) % m]))
-        # 底面（從下面看得到暗色的底）
-        under = leaves.add_vert(Vector((0, 0, z0 - drop * 0.6)), dark, (0, 0, -1))
-        for s in range(m):
-            leaves.f.append((under, rim[(s + 1) % m], rim[s]))
-    trunk.build("Bark"); leaves.build("Foliage")
+        for k in range(n):
+            if rng.random() < 0.22:      # 有些枝條缺掉，樹冠才有疏密，不是規律放射
+                continue
+            a = rot + k / n * math.tau + rng.uniform(-0.45, 0.45)
+            L = prof(z) * rng.uniform(0.7, 1.3) * (1.0 + 0.3 * noise.noise(Vector((math.cos(a) * 1.4, math.sin(a) * 1.4, z * 0.35))))
+            W = L / 2.05 * rng.uniform(1.0, 1.25)
+            dirn = Vector((math.cos(a), math.sin(a), 0))
+            side = Vector((-dirn.y, dirn.x, 0))
+            droop = lerp(0.55, 0.12, t) * L + rng.uniform(-0.05, 0.1) * L
+            roll = rng.uniform(-1.0, 1.0)
+            side = (side * math.cos(roll) + Vector((0, 0, 1)) * math.sin(roll)).normalized()
+            shade = 0.25 + 0.55 * t + rng.uniform(-0.12, 0.12)
+            # 每根枝條兩片十字交叉的卡片，從側面看也有體積，不是扁平的一層
+            up = dirn.cross(side).normalized()
+            for sd, ww in ((side, W), ((side + up * 1.3).normalized(), W * 0.72)):
+                for j in range(3):        # 三段：根部 → 中段 → 下垂的枝梢
+                    u = j / 2
+                    c = Vector((0, 0, z)) + dirn * L * u + Vector((0, 0, -droop * u * u + 0.08 * L * u))
+                    nrm = (dirn * 0.65 + Vector((0, 0, 1.0))).normalized()
+                    col = mix(dark, mid, shade * 1.3) if u < 0.6 else mix(mid, light, shade)
+                    for v, sgn in ((0.0, -1), (1.0, 1)):
+                        cards.add_vert(c + sd * sgn * ww * 0.5, col, nrm)
+                        cards.uv.append((u, v))
+                b0 = len(cards.v) - 6
+                for j in range(2):
+                    i0 = b0 + j * 2
+                    cards.f.append((i0, i0 + 2, i0 + 3, i0 + 1))
+    trunk.build("Bark"); leaves.build("Foliage"); cards.build("NeedleCard")
     export(name)
 
 
@@ -248,8 +273,8 @@ def bush(name, seed, size=1.3, flowers=False):
         a = rng.uniform(0, math.tau); r = size * rng.uniform(0.15, 0.45)
         c = Vector((math.cos(a) * r, math.sin(a) * r, size * rng.uniform(0.3, 0.6)))
         rad = size * rng.uniform(0.35, 0.5)
-        blob(leaves, c, rad * 0.88, crown_c, crown_r, rng, dark, mid, light, subdiv=2, squash=0.8)
-        leaf_cards(cards, c, rad, crown_c, crown_r, rng, (dark, mid, light), n=22, size=0.6, squash=0.8)
+        blob(leaves, c, rad * 0.62, crown_c, crown_r, rng, core(dark), core(dark), core(mid), subdiv=2, squash=0.8)
+        leaf_cards(cards, c, rad, crown_c, crown_r, rng, (dark, mid, light), n=130, size=0.25, squash=0.8)
     leaves.build("Foliage"); cards.build("LeafCard")
     export(name)
 

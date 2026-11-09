@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMG=~/git_project/img2_3d/tools
 CPY=~/git_project/ComfyUI/.venv/bin/python
 HPY=~/git_project/Hunyuan3D-2.1/.venv/bin/python
-TRIS=${TRIS:-30000}
+TRIS=${TRIS:-90000}
 for n in "$@"; do
   D="$ROOT/assets3d/$n"; t0=$(date +%s)
   if [ -z "${PAINT_ONLY:-}" ]; then
@@ -20,8 +20,9 @@ for n in "$@"; do
   t1=$(date +%s); echo "$n: shape $((t1 - t0))s"
   [ -n "${SHAPE_ONLY:-}" ] && continue
   curl -s -X POST 127.0.0.1:8188/free -H 'Content-Type: application/json' -d '{"unload_models":true,"free_memory":true}' >/dev/null; sleep 2
-  PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $HPY $IMG/hy21_paint.py "$D/blank.glb" "$D/paint/$n.obj" $(for r in ${REFS:-front left back right}; do echo "$D/ref_$r.png"; done) > "$D/paint.log" 2>&1 \
+  HY_VIEWS=${HY_VIEWS:-8} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $HPY $IMG/hy21_paint.py "$D/blank.glb" "$D/paint/$n.obj" $(for r in ${REFS:-front left back right}; do echo "$D/ref_$r.png"; done) > "$D/paint.log" 2>&1 \
     || { echo "$n: paint failed (see $D/paint.log)"; continue; }
+  $HPY "$ROOT/tools/post_texture.py" "$D/paint/$n.jpg" >/dev/null 2>&1
   blender -b -P "$ROOT/blender/obj2glb_smooth.py" -- "$D/paint/$n.obj" "$D/$n.glb" >/dev/null 2>&1
   echo "$n: paint $(( $(date +%s) - t1 ))s → $D/$n.glb"
 done

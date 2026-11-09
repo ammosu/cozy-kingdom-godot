@@ -9,6 +9,7 @@ var sun: DirectionalLight3D
 var env: Environment
 var grass_mat: ShaderMaterial
 var nature: Node3D
+var fog: Node3D
 
 func _ready() -> void:
 	layout = JSON.parse_string(FileAccess.get_file_as_string("res://assets/kingdom%s_layout.json" % ("_hy" if HY else "")))
@@ -31,9 +32,17 @@ func _ready() -> void:
 	nature.setup(layout)
 	if OS.get_environment("OLD_GRASS") == "":
 		nature.plant_ground_cover(self)
+	fog = load("res://scripts/fog.gd").new()
+	fog.name = "Fog"
+	add_child(fog)
+	fog.setup(env, sun)   # 要等地形碰撞建好，霧的高度圖才量得到
 	_spawn_actors()
 	if OS.get_environment("SHOT") != "":
 		_screenshot_mode()
+	if OS.get_environment("SELFTEST") != "":
+		var t: Node = load("res://scripts/selftest.gd").new()
+		add_child(t)
+		t.run($Actors, nature)
 
 # ---------- 天空、太陽、後製 ----------
 func _build_environment() -> void:
@@ -65,15 +74,15 @@ func _build_environment() -> void:
 	env.glow_bloom = 0.08
 	env.fog_enabled = true
 	env.fog_light_color = Color("cfe3f2")
-	env.fog_density = 0.0005
-	env.fog_aerial_perspective = 0.25
+	env.fog_density = 0.0011
+	env.fog_aerial_perspective = 0.45
 	env.fog_sky_affect = 0.3
 	env.volumetric_fog_enabled = true
 	env.volumetric_fog_density = 0.0015
 	env.volumetric_fog_albedo = Color("fff3dc")
 	env.volumetric_fog_anisotropy = 0.6
 	env.adjustment_enabled = true
-	env.adjustment_saturation = 1.15
+	env.adjustment_saturation = 1.05
 	env.adjustment_contrast = 1.08
 	var we := WorldEnvironment.new()
 	we.environment = env
@@ -84,9 +93,16 @@ func _build_environment() -> void:
 	sun.light_energy = 2.2
 	sun.rotation_degrees = Vector3(-38, -35, 0)
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 220.0
+	sun.directional_shadow_max_distance = 150.0
+	sun.directional_shadow_split_1 = 0.05
+	sun.directional_shadow_split_2 = 0.16
+	sun.directional_shadow_split_3 = 0.42
+	sun.shadow_normal_bias = 2.6   # 高密度模型的屋簷、窗框下方會出現梳齒狀的自陰影
+	sun.shadow_bias = 0.08
+	sun.shadow_blur = 2.2
 	sun.directional_shadow_blend_splits = true
-	sun.light_angular_distance = 0.8
+	sun.light_angular_distance = 0.0
+	RenderingServer.directional_soft_shadow_filter_set_quality(RenderingServer.SHADOW_QUALITY_SOFT_ULTRA)   # 預設品質的軟陰影在牆面上是一片顆粒
 	sun.light_volumetric_fog_energy = 1.2
 	add_child(sun)
 
@@ -140,7 +156,15 @@ func _tune_kingdom_materials(root: Node) -> void:
 				continue
 			_apply_texture(m)
 			if m.resource_name.begins_with("Grass"):
-				m.albedo_color = Color(0.62, 0.78, 0.5)   # 地面壓暗偏草根色，草叢之間的空隙才不會一塊塊發亮
+				var tm := ShaderMaterial.new()
+				tm.shader = load("res://shaders/terrain.gdshader")
+				tm.set_shader_parameter("albedo_tex", m.albedo_texture)
+				tm.set_shader_parameter("normal_tex", m.normal_texture)
+				var mn := NoiseTexture2D.new()
+				var mf := FastNoiseLite.new(); mf.frequency = 0.01; mf.fractal_octaves = 5
+				mn.noise = mf; mn.seamless = true; mn.width = 512; mn.height = 512
+				tm.set_shader_parameter("macro_tex", mn)
+				mi.mesh.surface_set_material(i, tm)
 			if m.resource_name == "Window":
 				m.emission_enabled = true
 				m.emission = Color("ffcf7a")
@@ -171,12 +195,12 @@ func _blade_mesh() -> ArrayMesh:
 			st.add_vertex(v[0])
 	return st.commit()
 
-func _on_road_or_building(p: Vector2) -> bool:
-	for r in layout.roads:
+func _on_road_or_building(p: Vector2, margin := 0.3) -> bool:
+	for r in layout.roads + layout.get("paths", []):
 		var a := Vector2(r.a[0], r.a[2]); var b := Vector2(r.b[0], r.b[2])
 		var ab := b - a
 		var t: float = clamp((p - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
-		if (p - (a + ab * t)).length() < r.w * 0.5 + 0.3:
+		if (p - (a + ab * t)).length() < r.w * 0.5 + margin:
 			return true
 	var plaza := Vector2(layout.plaza[0], layout.plaza[2])
 	if p.distance_to(plaza) < layout.plaza_radius + 0.5:
@@ -284,7 +308,12 @@ func _spawn_actors() -> void:
 		var a: Node3D = actors_script.new()
 		a.name = "Actors"
 		add_child(a)
+		a.fx = load("res://scripts/fx.gd").new()
+		a.fx.name = "Fx"
+		add_child(a.fx)
+		a.nature = nature
 		a.setup(layout)
+		fog.target = a.player
 
 # ---------- 截圖 ----------
 func _vec(s: String) -> Vector3:
@@ -302,6 +331,7 @@ func _screenshot_mode() -> void:
 		if grass_mat:
 			grass_mat.set_shader_parameter("time_override", float(t))
 		nature.set_time(float(t))
+		$Props.set_time(float(t))
 	var cam := Camera3D.new()
 	cam.fov = 55
 	cam.far = 1200

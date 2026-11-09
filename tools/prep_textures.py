@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC, OUT = ROOT / "textures" / "src", ROOT / "godot" / "assets" / "tex"
 OUT.mkdir(parents=True, exist_ok=True)
 NEUTRAL = {"plaster": 238.0, "roof_tiles": 215.0}
-STRENGTH = {"cobblestone": 3.0, "stone_wall": 3.0, "roof_tiles": 2.5, "wood_planks": 1.5, "plaster": 1.0, "dirt_path": 1.5, "grass_ground": 1.0}
+COLOR_ADJUST = {"gate_stone": (0.85, 1.05)}
+STRENGTH = {"cobblestone": 3.0, "stone_wall": 3.0, "gate_stone": 3.0, "roof_tiles": 2.5, "wood_planks": 1.5, "plaster": 1.0, "dirt_path": 1.5, "grass_ground": 1.0}
 
 
 def seam_score(a):
@@ -43,6 +44,9 @@ def normal_map(rgb, strength):
 
 for p in sorted(SRC.glob("*.png")):
     a = np.asarray(Image.open(p).convert("RGB").resize((1024, 1024), Image.LANCZOS), dtype=np.float32)
+    if p.stem in COLOR_ADJUST:   # [飽和度, 亮度]：讓材質的色調接近旁邊的模型
+        sat, gain = COLOR_ADJUST[p.stem]
+        a = np.clip((a.mean(axis=2, keepdims=True) * (1 - sat) + a * sat) * gain, 0, 255)
     before = seam_score(a)
     if before > 6:
         t = make_tileable(a)

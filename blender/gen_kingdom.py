@@ -234,7 +234,8 @@ def road(b, a, c, w, m):
     L = d.length
     rot = math.atan2(d.y, d.x)
     mid = (a + c) / 2
-    box(b, (mid.x, mid.y, 0.0), (L + w * 0.5, w, 0.04), m, rot)
+    # 不同材質的路在路口重疊，頂面同高會互相閃爍（z-fighting）：石板路一律比泥土路高
+    box(b, (mid.x, mid.y, 0.0), (L + w * 0.5, w, 0.05 if m is M["cobble"] else 0.02), m, rot)
     ROADS.append((a.to_2d(), c.to_2d(), w))
 
 
@@ -255,7 +256,8 @@ def build_roads():
     for ang in (math.radians(35), math.radians(145), math.radians(215), math.radians(325)):
         e = Vector((math.cos(ang), math.sin(ang), 0)) * R2
         road(b, PLAZA + (e - PLAZA).normalized() * PLAZA_R, e, 3.2, M["dirt"])
-    cyl(b, (PLAZA.x, PLAZA.y, 0.0), PLAZA_R, 0.05, M["cobble"], n=24)
+    cyl(b, (PLAZA.x, PLAZA.y, -0.02), PLAZA_R, 0.075, M["cobble"], n=48)
+    cyl(b, (PLAZA.x, PLAZA.y, -0.02), PLAZA_R + 0.35, 0.05, M["stone_dark"], n=48)   # 廣場外圈的路緣石
     return b.obj(), gate
 
 
@@ -332,7 +334,8 @@ def build_walls():
     if HY:   # 生成的城門樓用三角網格碰撞會把門洞堵住 → 只留兩座塔的方塊碰撞（Godot 端隱藏）
         hc = Bucket("HiddenCol-col")
         for side in (-1, 1):
-            box(hc, (g.x + tx * side * 5.5, g.y + ty * side * 5.5, 0), (4, 6, WALL_H + 5), M["stone"], tang)
+            # 內緣 2.3 m 對齊門洞襯裡（blender/fix_gatehouse.py），外緣到 7.75 m 的塔外牆
+            box(hc, (g.x + tx * side * 5.025, g.y + ty * side * 5.025, 0), (5.45, 6, WALL_H + 5), M["stone"], tang)
         hc.obj()
         return b.obj(), roofs.obj(), [list(v) for v in verts]
     for side in (-1, 1):
@@ -592,6 +595,26 @@ if not HY:
     build_laundry(houses_placed)
 trees = build_trees()
 
+# 入戶小徑：每棟房子的門連到最近的路（不進 ROADS，路燈和村民不走這裡）
+PATHS = []
+pb = Bucket("RoadsPaths")
+for h in houses_layout:
+    d = Vector(h["door"])
+    best, best_l = None, 1e9
+    for a, c, w in ROADS:
+        ab = c - a
+        t = max(0.0, min(1.0, (d - a).dot(ab) / ab.length_squared()))
+        q = a + ab * t
+        l = (d - q).length - w * 0.5
+        if l < best_l:
+            best, best_l = q, l
+    if 0.2 < best_l < 16.0:
+        v = best - d
+        m = (d + best) / 2
+        box(pb, (m.x, m.y, 0.0), (v.length, 1.3, 0.015), M["dirt"], math.atan2(v.y, v.x))
+        PATHS.append((d.copy(), best.copy()))
+pb.obj()
+
 for ob in scene.objects:   # 平滑著色關掉，保留低多邊形硬邊；地形例外（平滑起伏）
     for poly in ob.data.polygons:
         poly.use_smooth = ob.name.startswith("Terrain")
@@ -621,6 +644,7 @@ layout = dict(
     wall_h=WALL_H,
     stalls=[to_godot(*s["pos"]) for s in stalls],
     roads=[dict(a=to_godot(a.x, a.y), b=to_godot(c.x, c.y), w=w) for a, c, w in ROADS],
+    paths=[dict(a=to_godot(a.x, a.y), b=to_godot(c.x, c.y), w=1.3) for a, c in PATHS],
     trees=[to_godot(x, y, ground_h(x, y)) for x, y, _ in trees],
 )
 (out_dir / f"kingdom{SUF}_layout.json").write_text(json.dumps(layout, ensure_ascii=False))

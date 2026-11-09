@@ -1,0 +1,188 @@
+extends Node3D
+## 霧氣預設：F 鍵切換（截圖用環境變數 FOG=0/1/2）。
+## 0 平常；1 晨霧：低角度暖陽＋貼地薄霧＋光柱＋飄浮光塵；2 濃霧：能見度低、燈籠光暈明顯。
+
+const AREA := 340.0
+const RES := 170
+# [名稱, 太陽俯角, 太陽能量, 太陽色, 體積霧底密度, 霧層密度, 霧層厚, 覆蓋率, 距離霧, 環境光, 光塵量, 霧的補光色]
+const PRESETS := [
+	["平常", -38.0, 2.2, "fff0d4", 0.0015, 0.0, 0.1, 0.0, 0.0005, 0.55, 0.0, "000000"],
+	["晨霧", -18.0, 3.0, "ffdcae", 0.0012, 0.15, 13.0, 0.55, 0.82, 0.72, 1.0, "f4ead8"],
+	["濃霧", -30.0, 2.0, "fff2dc", 0.0, 0.03, 40.0, 0.95, 1.0, 0.95, 0.6, "f6f3ea"],   # 霧層比屋頂高很多，畫面上看不到霧頂的水平線
+]
+var env: Environment
+var sun: DirectionalLight3D
+var mat: ShaderMaterial
+var vol: FogVolume
+var motes: GPUParticles3D
+var target: Node3D
+var idx := 0
+var label: Label
+var label_t := 0.0
+
+func setup(e: Environment, s: DirectionalLight3D) -> void:
+	env = e
+	sun = s
+	env.volumetric_fog_length = 180.0
+	env.volumetric_fog_detail_spread = 2.0
+	env.volumetric_fog_temporal_reprojection_amount = 0.85
+	RenderingServer.environment_set_volumetric_fog_volume_size(128, 128)
+	_build_volume()
+	_build_motes()
+	var cl := CanvasLayer.new()
+	add_child(cl)
+	label = Label.new()
+	label.position = Vector2(24, 20)
+	label.add_theme_font_size_override("font_size", 22)
+	label.modulate.a = 0.0
+	cl.add_child(label)
+	var f := OS.get_environment("FOG")
+	apply(int(f) if f != "" else 0)
+	label_t = 0.0   # 開場不顯示
+
+func _build_volume() -> void:
+	var img := _bake_height()
+	var fn := FastNoiseLite.new()
+	fn.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	fn.frequency = 0.03
+	fn.fractal_octaves = 3
+	var n3 := NoiseTexture3D.new()
+	n3.width = 96; n3.height = 48; n3.depth = 96
+	n3.seamless = true
+	n3.normalize = true
+	n3.noise = fn
+	mat = ShaderMaterial.new()
+	mat.shader = load("res://shaders/mist.gdshader")
+	mat.set_shader_parameter("height_tex", ImageTexture.create_from_image(img))
+	mat.set_shader_parameter("height_rect", Vector4(-AREA * 0.5, -AREA * 0.5, AREA, AREA))
+	mat.set_shader_parameter("noise_tex", n3)
+	vol = FogVolume.new()
+	vol.shape = RenderingServer.FOG_VOLUME_SHAPE_BOX
+	vol.size = Vector3(AREA, 90.0, AREA)
+	vol.position = Vector3(0, 30, 0)
+	vol.material = mat
+	add_child(vol)
+
+func _bake_height() -> Image:
+	# 射線量地面高度，霧才會順著山坡。只認地形，房子和牆不算
+	var img := Image.create(RES, RES, false, Image.FORMAT_RF)
+	var space := get_world_3d().direct_space_state
+	for y in RES:
+		for x in RES:
+			var wx := (float(x) + 0.5) / RES * AREA - AREA * 0.5
+			var wz := (float(y) + 0.5) / RES * AREA - AREA * 0.5
+			var q := PhysicsRayQueryParameters3D.create(Vector3(wx, 150, wz), Vector3(wx, -60, wz))
+			var h := 0.0
+			for i in 6:
+				var hit := space.intersect_ray(q)
+				if hit.is_empty():
+					break
+				if String(hit.collider.get_parent().name).begins_with("Terrain"):
+					h = hit.position.y
+					break
+				q.exclude = q.exclude + [hit.rid]
+			img.set_pixel(x, y, Color(h, 0, 0))
+	return img
+
+func _build_motes() -> void:
+	motes = GPUParticles3D.new()
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = Vector3(16, 5, 16)
+	pm.gravity = Vector3(0, 0.02, 0)
+	pm.direction = Vector3(1, 0.2, 0.5)
+	pm.spread = 180.0
+	pm.initial_velocity_min = 0.05
+	pm.initial_velocity_max = 0.25
+	pm.scale_min = 0.5
+	pm.scale_max = 1.3
+	var curve := Curve.new()
+	curve.add_point(Vector2(0, 0)); curve.add_point(Vector2(.2, 1)); curve.add_point(Vector2(.8, 1)); curve.add_point(Vector2(1, 0))
+	var ct := CurveTexture.new()
+	ct.curve = curve
+	pm.scale_curve = ct
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.albedo_color = Color(1.0, 0.86, 0.55, 0.8)
+	var g := Gradient.new()
+	g.set_color(0, Color(1, 1, 1, 1))
+	g.set_color(1, Color(1, 1, 1, 0))
+	var tex := GradientTexture2D.new()
+	tex.gradient = g; tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(.5, .5); tex.fill_to = Vector2(1, .5); tex.width = 32; tex.height = 32
+	m.albedo_texture = tex
+	var q := QuadMesh.new()
+	q.size = Vector2(0.05, 0.05)
+	q.material = m
+	motes.draw_pass_1 = q
+	motes.process_material = pm
+	motes.amount = 260
+	motes.lifetime = 7.0
+	motes.preprocess = 7.0
+	motes.local_coords = false
+	motes.visibility_aabb = AABB(Vector3(-40, -15, -40), Vector3(80, 30, 80))
+	motes.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(motes)
+
+func apply(i: int) -> void:
+	idx = i % PRESETS.size()
+	var p: Array = PRESETS[idx]
+	sun.rotation_degrees.x = p[1]
+	sun.light_energy = p[2]
+	sun.light_color = Color(p[3])
+	sun.light_volumetric_fog_energy = 1.2 if idx == 0 else 2.6
+	env.volumetric_fog_density = p[4]
+	env.volumetric_fog_enabled = true
+	# 霧天用距離式的霧：近景保留對比，越遠越濃，最遠處完全融進霧色（濃度欄位在這個模式是最大不透明度）
+	if idx == 0:
+		env.fog_mode = Environment.FOG_MODE_EXPONENTIAL
+		env.fog_density = 0.0011
+	else:
+		env.fog_mode = Environment.FOG_MODE_DEPTH
+		env.fog_density = p[8]
+		env.fog_depth_begin = 18.0 if idx == 1 else 4.0
+		env.fog_depth_end = 420.0 if idx == 1 else 165.0
+		env.fog_depth_curve = 1.3 if idx == 1 else 0.72
+	env.fog_light_energy = 1.0 if idx < 2 else 1.5   # 濃霧時遠山要跟天空同亮，不然會留下深色剪影
+	env.fog_sky_affect = 0.3 if idx == 0 else (0.75 if idx == 1 else 1.0)
+	env.fog_aerial_perspective = 0.45 if idx == 0 else 0.0   # 霧天不混天空色，山才會整片融進霧色
+	env.volumetric_fog_sky_affect = 1.0 if idx == 0 else 0.2   # 霧不要把天空壓暗
+	var sky := env.sky.sky_material as ProceduralSkyMaterial
+	sky.sky_top_color = Color(["2f78d8", "7fb0e2", "efece4"][idx])
+	sky.sky_horizon_color = Color(["a9d4f2", "ffe6c8", "efece4"][idx])
+	sky.ground_horizon_color = Color(["bfe0f5", "ffe6c8", "efece4"][idx])
+	env.ambient_light_energy = p[9]
+	# 濃霧時霧色、天空色要相同，遠山才會整片消失，不留深色剪影
+	env.fog_light_color = Color("cfe3f2") if idx == 0 else (Color(p[3]).lerp(Color("dfe8f2"), 0.55) if idx == 1 else Color("efece4"))
+	var g := Color(p[11])
+	mat.set_shader_parameter("glow", g)
+	env.volumetric_fog_emission = g
+	env.volumetric_fog_emission_energy = 0.0 if idx == 0 else p[4] * 0.9
+	env.volumetric_fog_gi_inject = 1.0 if idx == 0 else 0.25
+	env.adjustment_saturation = [1.05, 0.98, 0.8][idx]   # 霧裡的顏色會變淡，前景不能還是飽和的鮮綠
+	mat.set_shader_parameter("density", p[5])
+	mat.set_shader_parameter("near_start", 8.0 if idx < 2 else 14.0)
+	mat.set_shader_parameter("mist_height", p[6])
+	mat.set_shader_parameter("coverage", p[7])
+	vol.visible = p[5] > 0.0
+	motes.emitting = p[10] > 0.0
+	motes.visible = p[10] > 0.0
+	motes.amount_ratio = maxf(p[10], 0.01)
+	label.text = "霧氣：%s（F 切換）" % p[0]
+	label_t = 2.0
+
+func _unhandled_key_input(e: InputEvent) -> void:
+	if e.is_pressed() and not e.is_echo() and (e as InputEventKey).keycode == KEY_F:
+		apply(idx + 1)
+
+func _process(dt: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	if cam:
+		mat.set_shader_parameter("cam_pos", cam.global_position)
+	if target and motes.visible:
+		motes.global_position = target.global_position + Vector3(0, 2.5, 0)
+	label_t -= dt
+	label.modulate.a = clampf(label_t, 0.0, 1.0)
