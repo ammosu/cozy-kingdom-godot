@@ -48,6 +48,8 @@ func _ready() -> void:
 		add_child(r)
 		if OS.get_environment("REEL") == "interact":
 			r.interact($Actors, fog)
+		elif OS.get_environment("REEL") == "wisp":
+			r.wisp_clip($Actors, fog)
 		else:
 			r.reel($Actors, fog)
 

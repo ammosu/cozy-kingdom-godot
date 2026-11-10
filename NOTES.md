@@ -59,4 +59,5 @@
 - **音效**：`python3 tools/gen_sfx.py` 程序化合成到 `godot/assets/sfx/`，新增後要跑 `godot --headless --path godot --import`。
 - **揮劍吹霧**：遠處的霧在鏡頭 8 m 內會淡出，濃霧的遠景又主要是距離霧，吹開也看不出來，所以霧天多一層貼地低霧（`ground_density`），風吹的主要是這層。範圍不能大：揮砍 11–16 m、下劈 8 m，再大就太誇張。在邊緣補霧反而會像憑空冒出一團霧。
 - **敵人素材**：`godot/assets/chars/kaykit/` 是 KayKit Skeletons 1.0（CC0，授權檔在同目錄）。測試片：`REEL=interact tools/record.sh <名稱>`。
+- **小光靈**：`godot/scripts/wisp.gd`，取代原本掛在玩家身上的燈籠光，`WISP=0` 可關掉。帶陰影的點光約多花 1 ms。太靠近白色骷髏時冷色光會把整隻染藍，所以注意敵人時的亮度和距離都不能再加。測試片：`REEL=wisp tools/record.sh <名稱>`。
 - **相關筆記**：beach3d-eval 的 `PLAYBOOK.md` 有 Tripo 與 Blender 的其他筆記。

@@ -257,5 +257,44 @@ func run(actors: Node3D, nat: Node3D) -> void:
 	await frames(int(7.0 * Engine.physics_ticks_per_second))
 	check("衝擊波結束", fog_n.blasts.is_empty(), fog_n.blasts.size())
 	check("下劈收招", not a.attacking and a.plunge == 0)
+	# 13. 小光靈：跟隨、不穿牆、注意敵人、瞬移跟上、光會閃動
+	var wsp: Node3D = a.wisp
+	await tp(0, 84, 0.0)
+	await frames(20)
+	var far := 0.0
+	var energies := {}
+	for i in 90:
+		Input.action_press("move_forward")
+		Input.action_press("run")
+		await get_tree().physics_frame
+		if wsp.focus == null and wsp.leash <= wsp.REST_LEASH:   # 路上遇到村民會飛過去，這不算跟丟
+			far = maxf(far, wsp.global_position.distance_to(wsp._anchor()))
+		energies[snappedf(wsp.light.light_energy, 0.01)] = true
+	Input.action_release("move_forward")
+	Input.action_release("run")
+	check("光靈跟著跑", far <= wsp.REST_LEASH + 0.05, far)
+	check("光靈的光會閃動", energies.size() > 20, energies.size())
+	await tp(1.0, 58, -PI / 2.0)
+	var through := 0
+	for i in 150:
+		Input.action_press("move_forward")
+		await get_tree().physics_frame
+		var ws: Vector3 = wsp.global_position
+		if wsp._clear(wsp._anchor(), ws) != ws:
+			through += 1
+	Input.action_release("move_forward")
+	check("光靈不穿牆", through == 0, through)
+	await frames(30)
+	var ep: Vector3 = en_n.global_position
+	await tp(ep.x + 4.0, ep.z + 3.0, atan2(4.0, 3.0))
+	var idle_blue: float = wsp.tint.b
+	await frames(90)
+	check("光靈注意到敵人", wsp.focus == en_n, wsp.focus)
+	check("靠近敵人時換色", wsp.tint.b > idle_blue + 0.2, wsp.tint)
+	check("光靈飛到敵人旁邊", wsp.global_position.distance_to(ep + Vector3.UP * wsp.FOE_HEAD) < 1.6, wsp.global_position)
+	await tp(0, 110, 0.0)
+	await frames(30)
+	check("瞬移後光靈跟上", wsp.global_position.distance_to(wsp._anchor()) < wsp.REST_LEASH, wsp.global_position)
+	check("離開後不再注意", wsp.focus == null, wsp.focus)
 	print("SELFTEST done fails=", fails)
 	get_tree().quit()
