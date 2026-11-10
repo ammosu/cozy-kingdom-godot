@@ -13,3 +13,7 @@
 | `sc_furnace` | `scenario:asset_fduM1CFje1opNrQcpjWZXQDs` |
 | `sc_fox` | `scenario:asset_cPzUEPqKjyz1RvGhWodJygJL` |
 | `sc_rock_1` 到 `sc_rock_6` | `scenario:asset_HfUCJYUTuJ3PC7ixRcuiqbHh` |
+
+## KayKit Character Pack: Skeletons 1.0
+
+骷髏角色與刀取自 [KayKit Skeletons](https://kaylousberg.itch.io/kaykit-skeletons)，作者 Kay Lousberg，授權 CC0（不需標註）。檔案在 `godot/assets/chars/kaykit/`，內含原始授權檔。
