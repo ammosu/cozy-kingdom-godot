@@ -22,6 +22,7 @@ var mounted := false
 var villagers: Array = []
 var stall_vs: Array = []
 var enemies: Array = []
+var wisp: Node3D
 var yaw := 0.0
 var pitch := -0.25
 var vel_y := 0.0
@@ -120,6 +121,11 @@ func setup(l: Dictionary) -> void:
 	_make_villagers()
 	_make_enemies()
 	_make_elk()
+	if OS.get_environment("WISP") != "0":
+		wisp = load("res://scripts/wisp.gd").new()
+		wisp.name = "Wisp"
+		add_child(wisp)
+		wisp.setup(self)
 
 
 func _v(a: Array) -> Vector3:
@@ -151,13 +157,6 @@ func _make_player() -> void:
 	player_anim = find_anim(player_visual)
 	set_loops(player_anim, ["idle", "walk", "run"])
 	player_anim.play("idle")
-	# 燈籠光
-	var lamp := OmniLight3D.new()
-	lamp.light_color = Color("ffc56b")
-	lamp.light_energy = 0.8
-	lamp.omni_range = 4.0
-	lamp.position = Vector3(0.25, 0.6, 0.1)
-	player.add_child(lamp)
 	add_child(player)
 	var sp := _v(layout.spawn)
 	var env_p := OS.get_environment("PLAYER")   # 截圖用：PLAYER=x,z

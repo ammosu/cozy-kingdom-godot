@@ -88,6 +88,38 @@ func interact(actors: Node3D, fog: Node) -> void:
 	await set_fade(0.0, 1.0, 0.25)
 	get_tree().quit()
 
+## 小光靈測試片（REEL=wisp tools/record.sh <名稱>）：靠近骷髏、穿過城門暗處、靠近攤販、濃霧裡走
+func wisp_clip(actors: Node3D, fog: Node) -> void:
+	a = actors
+	fade.color.a = 1.0
+	await frames(sec(1.5))
+	var en: Vector3 = a.enemies[0].node.global_position
+	var from := en + Vector3(7.0, 0, 6.0)
+	a.pitch = -0.16
+	await tp(from.x, from.z, atan2(7.0, 6.0))
+	await frames(sec(0.8))
+	await set_fade(1.0, 0.0, 0.3)
+	await hold(["move_forward"], sec(2.2))
+	await orbit(atan2(7.0, 6.0) + 1.1, 3.0)
+	await cut(0, 66, 0.0, -0.12)
+	await hold(["move_forward"], sec(5.0))
+	var st: Vector3 = a.stall_vs[0].node.global_position
+	var out: Vector3 = (_v2(a.layout.plaza) - st).normalized() * 4.0
+	await cut(st.x + out.x, st.z + out.z, atan2(out.x, out.z), -0.14)
+	await orbit(atan2(out.x, out.z) + 0.9, 3.5)
+	await set_fade(0.0, 1.0, 0.25)
+	fog.apply(2)
+	await tp(0, 92, 0.0)
+	a.pitch = -0.08
+	await frames(sec(1.5))
+	await set_fade(1.0, 0.0, 0.3)
+	await hold(["move_forward"], sec(3.5))
+	await set_fade(0.0, 1.0, 0.4)
+	get_tree().quit()
+
+func _v2(v: Array) -> Vector3:
+	return Vector3(v[0], v[1], v[2])
+
 func reel(actors: Node3D, fog: Node) -> void:
 	a = actors
 	fade.color.a = 1.0
