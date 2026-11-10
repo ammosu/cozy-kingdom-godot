@@ -30,7 +30,7 @@
    - 時間軸寫在 `actors.gd` 的 `DEMO_STEPS`。`REEL=1 tools/record.sh <名稱>` 錄分段展示版，內容寫在 `godot/scripts/demo_reel.gd`。
    - 用 `tools/contact.sh video/x.mp4 1.0` 出縮圖總表。
 
-操作：WASD 移動、Shift 跑、Space 跳、左鍵攻擊（空中按是跳起下劈）、R 召喚／上下麋鹿、F 切換霧氣、Esc 放開滑鼠。
+操作：WASD 移動、Shift 跑、Space 跳、左鍵攻擊（空中按是跳起下劈）、R 召喚／上下麋鹿、F 切換天氣、Esc 放開滑鼠。
 
 ## 踩過的坑
 
@@ -60,4 +60,6 @@
 - **揮劍吹霧**：遠處的霧在鏡頭 8 m 內會淡出，濃霧的遠景又主要是距離霧，吹開也看不出來，所以霧天多一層貼地低霧（`ground_density`），風吹的主要是這層。範圍不能大：揮砍 11–16 m、下劈 8 m，再大就太誇張。在邊緣補霧反而會像憑空冒出一團霧。
 - **敵人素材**：`godot/assets/chars/kaykit/` 是 KayKit Skeletons 1.0（CC0，授權檔在同目錄）。測試片：`REEL=interact tools/record.sh <名稱>`。
 - **小光靈**：`godot/scripts/wisp.gd`，取代原本掛在玩家身上的燈籠光，`WISP=0` 可關掉。帶陰影的點光約多花 1 ms。太靠近白色骷髏時冷色光會把整隻染藍，所以注意敵人時的亮度和距離都不能再加。測試片：`REEL=wisp tools/record.sh <名稱>`。
+- **天空**：`godot/shaders/sky_atmos.gdshader`。體積雲在半解析度算，cubemap 只算便宜版。雲的時間要走 `global uniform`（project.godot 的 `cloud_t`）：一般 uniform 或 `TIME` 都會讓環境光每幀重烘。太陽顏色跟 `LIGHT0_DIRECTION` 走，晴天的 `fog_sky_affect` 要壓低，不然 AgX 下的藍天會發白。
+- **雨天**：F 切到第 4 個天氣，或 `FOG=3`。`rain.gd` 的雨絲用高度場碰撞，屋簷和門洞底下才不會淋到雨；雨絲範圍要落在高度場內，超出去會在半空判定成碰撞，出現飄在天上的水圈。
 - **相關筆記**：beach3d-eval 的 `PLAYBOOK.md` 有 Tripo 與 Blender 的其他筆記。

@@ -1,6 +1,6 @@
 extends Node3D
-## 霧氣預設：F 鍵切換（截圖用環境變數 FOG=0/1/2）。
-## 0 平常；1 晨霧：低角度暖陽＋貼地薄霧＋光柱＋飄浮光塵；2 濃霧：能見度低、燈籠光暈明顯。
+## 天氣預設：F 鍵切換（截圖用環境變數 FOG=0/1/2/3）。
+## 0 平常；1 晨霧：低角度暖陽＋貼地薄霧＋光柱＋飄浮光塵；2 濃霧：能見度低、燈籠光暈明顯；3 雨天：烏雲、雨絲、地面積水。
 
 const AREA := 340.0
 const RES := 170
@@ -9,6 +9,7 @@ const PRESETS := [
 	["平常", -38.0, 2.2, "fff0d4", 0.0015, 0.0, 0.1, 0.0, 0.0005, 0.55, 0.0, "000000"],
 	["晨霧", -18.0, 3.0, "ffdcae", 0.0012, 0.15, 13.0, 0.55, 0.82, 0.72, 1.0, "f4ead8"],
 	["濃霧", -30.0, 2.0, "fff2dc", 0.0, 0.03, 40.0, 0.95, 1.0, 0.95, 0.6, "f6f3ea"],   # 霧層比屋頂高很多，畫面上看不到霧頂的水平線
+	["雨天", -55.0, 0.32, "d3dbe6", 0.0, 0.0, 0.1, 0.0, 0.8, 0.62, 0.0, "000000"],
 ]
 var env: Environment
 var sun: DirectionalLight3D
@@ -24,6 +25,10 @@ const BLAST_MAX := 2
 const BLAST_R := 8.0
 const BLAST_LIFE := 4.5
 var blasts: Array = []         # 下劈的衝擊波：{o 落點, t 經過秒數}
+const RAIN := 3
+var rain: Node3D
+var cloud_t := 0.0
+const CLOUD_T0 := 4000.0   # 開場時雲的位置
 var gusts: Array = []          # 揮劍的風：{o 起點, d 方向, len 最終長度, r 半徑, life 全長, t 經過秒數}
 
 func setup(e: Environment, s: DirectionalLight3D) -> void:
@@ -35,6 +40,9 @@ func setup(e: Environment, s: DirectionalLight3D) -> void:
 	RenderingServer.environment_set_volumetric_fog_volume_size(128, 128)
 	_build_volume()
 	_build_motes()
+	rain = load("res://scripts/rain.gd").new()
+	rain.name = "Rain"
+	add_child(rain)
 	var cl := CanvasLayer.new()
 	add_child(cl)
 	label = Label.new()
@@ -149,28 +157,30 @@ func apply(i: int) -> void:
 	else:
 		env.fog_mode = Environment.FOG_MODE_DEPTH
 		env.fog_density = p[8]
-		env.fog_depth_begin = 18.0 if idx == 1 else 4.0
-		env.fog_depth_end = 420.0 if idx == 1 else 165.0
-		env.fog_depth_curve = 1.3 if idx == 1 else 0.72
-	env.fog_light_energy = 1.0 if idx < 2 else 1.5   # 濃霧時遠山要跟天空同亮，不然會留下深色剪影
-	env.fog_sky_affect = 0.3 if idx == 0 else (0.75 if idx == 1 else 1.0)
+		env.fog_depth_begin = [0.0, 18.0, 4.0, 10.0][idx]
+		env.fog_depth_end = [0.0, 420.0, 165.0, 300.0][idx]
+		env.fog_depth_curve = [1.0, 1.3, 0.72, 1.1][idx]
+	env.fog_light_energy = [1.0, 1.0, 1.5, 0.72][idx]   # 濃霧時遠山要跟天空同亮，不然會留下深色剪影
+	env.fog_sky_affect = [0.08, 0.45, 1.0, 0.55][idx]
 	env.fog_aerial_perspective = 0.45 if idx == 0 else 0.0   # 霧天不混天空色，山才會整片融進霧色
 	env.volumetric_fog_sky_affect = 1.0 if idx == 0 else 0.2   # 霧不要把天空壓暗
-	var sky := env.sky.sky_material as ProceduralSkyMaterial
-	sky.sky_top_color = Color(["2f78d8", "7fb0e2", "efece4"][idx])
-	sky.sky_horizon_color = Color(["a9d4f2", "ffe6c8", "efece4"][idx])
-	sky.ground_horizon_color = Color(["bfe0f5", "ffe6c8", "efece4"][idx])
+	var sky := env.sky.sky_material as ShaderMaterial
+	sky.set_shader_parameter("coverage", [0.47, 0.4, 0.5, 0.92][idx])
+	sky.set_shader_parameter("haze", [1.0, 3.0, 1.0, 1.0][idx])
+	sky.set_shader_parameter("flat_mix", 1.0 if idx == 2 else 0.0)
+	sky.set_shader_parameter("storm", 1.0 if idx == RAIN else 0.0)
+	sky.set_shader_parameter("flat_col", Color("efece4"))
 	env.ambient_light_energy = p[9]
 	# 濃霧時霧色、天空色要相同，遠山才會整片消失，不留深色剪影
-	env.fog_light_color = Color("cfe3f2") if idx == 0 else (Color(p[3]).lerp(Color("dfe8f2"), 0.55) if idx == 1 else Color("efece4"))
+	env.fog_light_color = [Color("cfe3f2"), Color(p[3]).lerp(Color("dfe8f2"), 0.55), Color("efece4"), Color("9aa4b2")][idx]
 	var g := Color(p[11])
 	mat.set_shader_parameter("glow", g)
 	env.volumetric_fog_emission = g
 	env.volumetric_fog_emission_energy = 0.0 if idx == 0 else p[4] * 0.9
 	env.volumetric_fog_gi_inject = 1.0 if idx == 0 else 0.25
-	env.adjustment_saturation = [1.05, 0.98, 0.8][idx]   # 霧裡的顏色會變淡，前景不能還是飽和的鮮綠
+	env.adjustment_saturation = [1.05, 0.98, 0.8, 0.85][idx]   # 霧裡的顏色會變淡，前景不能還是飽和的鮮綠
 	mat.set_shader_parameter("density", p[5])
-	mat.set_shader_parameter("ground_density", 0.0 if idx == 0 else 0.2)
+	mat.set_shader_parameter("ground_density", 0.0 if idx == 0 or idx == RAIN else 0.2)
 	mat.set_shader_parameter("near_start", 8.0 if idx < 2 else 14.0)
 	mat.set_shader_parameter("mist_height", p[6])
 	mat.set_shader_parameter("coverage", p[7])
@@ -178,7 +188,11 @@ func apply(i: int) -> void:
 	motes.emitting = p[10] > 0.0
 	motes.visible = p[10] > 0.0
 	motes.amount_ratio = maxf(p[10], 0.01)
-	label.text = "霧氣：%s（F 切換）" % p[0]
+	env.ssr_enabled = idx == RAIN     # 只有雨天地面有積水要反射
+	if rain:
+		rain.set_active(idx == RAIN)
+	get_parent().set_wet(1.0 if idx == RAIN else 0.0)
+	label.text = "天氣：%s（F 切換）" % p[0]
 	label_t = 2.0
 
 func _unhandled_key_input(e: InputEvent) -> void:
@@ -238,6 +252,8 @@ func _update_gusts(dt: float) -> void:
 
 func _process(dt: float) -> void:
 	_update_gusts(dt)
+	cloud_t += dt
+	RenderingServer.global_shader_parameter_set("cloud_t", cloud_t + CLOUD_T0)
 	var cam := get_viewport().get_camera_3d()
 	if cam:
 		mat.set_shader_parameter("cam_pos", cam.global_position)
