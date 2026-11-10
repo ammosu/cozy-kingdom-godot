@@ -8,13 +8,13 @@ SR = 44100
 OUT = os.path.join(os.path.dirname(__file__), "..", "godot", "assets", "sfx")
 
 
-def save(name, x, peak_db=-3.0):
+def save(name, x, peak_db=-3.0, fade_out=True):
     m = max(abs(v) for v in x) or 1.0
     g = 10 ** (peak_db / 20) / m
-    fade = int(SR * 0.004)
+    fade = int(SR * 0.004) if fade_out else 1
     with wave.open(os.path.join(OUT, name + ".wav"), "wb") as f:
         f.setnchannels(1); f.setsampwidth(2); f.setframerate(SR)
-        f.writeframes(b"".join(struct.pack("<h", int(v * g * min(1.0, (len(x) - i) / fade) * 32767)) for i, v in enumerate(x)))
+        f.writeframes(b"".join(struct.pack("<h", int(v * g * (min(1.0, (len(x) - i) / fade) if fade_out else 1.0) * 32767)) for i, v in enumerate(x)))
 
 
 def bandnoise(n, r, freq, q):
@@ -81,6 +81,22 @@ def hit_hard(seed):
     return mix(*parts, (click, 0.5), (thud, 0.5))
 
 
+def rain_loop(seed, dur=8.0, overlap=1.0):
+    """雨聲：高頻細雨＋中頻打在地面的沙沙聲＋隨機的水滴。頭尾交叉淡化，循環時聽不出接縫"""
+    r = random.Random(seed)
+    n = int(SR * (dur + overlap))
+    hiss = bandnoise(n, r, lambda t: 6200, 0.7)
+    body = bandnoise(n, r, lambda t: 1500, 0.6)
+    x = [hiss[i] * 0.55 + body[i] * 0.9 for i in range(n)]
+    for _ in range(int(dur * 16)):
+        at = r.randrange(n - 900)
+        f = r.uniform(1400, 3600); a = r.uniform(0.15, 0.5)
+        for j in range(900):
+            x[at + j] += a * math.sin(2 * math.pi * f * j / SR) * math.exp(-j / 170)
+    m = int(SR * dur); ov = n - m
+    return [x[i] * (i / ov) + x[m + i] * (1 - i / ov) if i < ov else x[i] for i in range(m)]
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     for i in range(4):
@@ -93,3 +109,4 @@ if __name__ == "__main__":
         save(f"hit_heavy_{i}", hit_heavy(40 + i), -2)
     for i in range(3):
         save(f"hit_hard_{i}", hit_hard(50 + i), -7)
+    save("rain_loop", rain_loop(70), -12, fade_out=False)

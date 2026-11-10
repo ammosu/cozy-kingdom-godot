@@ -4,6 +4,7 @@ render_mode diffuse_lambert_wrap;
 uniform sampler2D albedo_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D macro_tex : filter_linear, repeat_enable;
+uniform float wet = 0.0;
 varying vec3 wp;
 varying vec3 wn;
 void vertex() {
@@ -27,9 +28,9 @@ void fragment() {
 	land = mix(land, rock, smoothstep(0.5, 0.72, slope + (m3 - 0.5) * 0.2) * 0.5);
 	land = mix(land, rock * 1.15, smoothstep(150.0, 240.0, wp.y + (m2 - 0.5) * 40.0) * 0.55);
 	land *= mix(0.82, 1.15, m3);
-	ALBEDO = mix(near_col, land, far);
+	ALBEDO = mix(near_col, land, far) * mix(1.0, 0.74, wet * (1.0 - far));
 	NORMAL_MAP = texture(normal_tex, uv).rgb;
 	NORMAL_MAP_DEPTH = 0.6 * (1.0 - far);
-	ROUGHNESS = 0.95;
-	SPECULAR = 0.15;
+	ROUGHNESS = mix(0.95, 0.55, wet);
+	SPECULAR = mix(0.15, 0.35, wet);
 }

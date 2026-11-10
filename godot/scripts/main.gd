@@ -10,6 +10,10 @@ var env: Environment
 var grass_mat: ShaderMaterial
 var nature: Node3D
 var fog: Node3D
+var wet := 0.0
+var wet_shaders: Array[ShaderMaterial] = []
+var wet_std: Array = []
+var puddle_tex: NoiseTexture2D
 
 func _ready() -> void:
 	layout = JSON.parse_string(FileAccess.get_file_as_string("res://assets/kingdom%s_layout.json" % ("_hy" if HY else "")))
@@ -53,15 +57,24 @@ func _ready() -> void:
 		else:
 			r.reel($Actors, fog)
 
+func _cloud_noise(kind: int, size: int, freq: float, octaves: int) -> NoiseTexture3D:
+	var fn := FastNoiseLite.new()
+	fn.noise_type = kind
+	fn.frequency = freq
+	fn.fractal_octaves = octaves
+	var n3 := NoiseTexture3D.new()
+	n3.width = size; n3.height = size; n3.depth = size
+	n3.seamless = true
+	n3.normalize = true
+	n3.noise = fn
+	return n3
+
 # ---------- 天空、太陽、後製 ----------
 func _build_environment() -> void:
-	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color("2f78d8")
-	sky_mat.sky_horizon_color = Color("a9d4f2")
-	sky_mat.ground_horizon_color = Color("bfe0f5")
-	sky_mat.ground_bottom_color = Color("6c8c5a")
-	sky_mat.sun_angle_max = 20.0
-	sky_mat.sky_curve = 0.12
+	var sky_mat := ShaderMaterial.new()
+	sky_mat.shader = load("res://shaders/sky_atmos.gdshader")
+	sky_mat.set_shader_parameter("shape_tex", _cloud_noise(FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 96, 0.022, 5))
+	sky_mat.set_shader_parameter("detail_tex", _cloud_noise(FastNoiseLite.TYPE_CELLULAR, 48, 0.09, 3))
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 	env = Environment.new()
@@ -152,6 +165,35 @@ func _apply_texture(m: BaseMaterial3D) -> void:
 		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 		return
 
+func _wet_road(m: BaseMaterial3D) -> ShaderMaterial:
+	var rm := ShaderMaterial.new()
+	rm.shader = load("res://shaders/wet_road.gdshader")
+	rm.set_shader_parameter("albedo_tex", m.albedo_texture)
+	rm.set_shader_parameter("normal_tex", m.normal_texture)
+	rm.set_shader_parameter("uv_scale", Vector2(m.uv1_scale.x, m.uv1_scale.y))
+	rm.set_shader_parameter("base_rough", m.roughness)
+	if puddle_tex == null:
+		var f := FastNoiseLite.new()
+		f.frequency = 0.012
+		f.fractal_octaves = 4
+		puddle_tex = NoiseTexture2D.new()
+		puddle_tex.noise = f
+		puddle_tex.seamless = true
+		puddle_tex.width = 512
+		puddle_tex.height = 512
+	rm.set_shader_parameter("puddle_tex", puddle_tex)
+	wet_shaders.append(rm)
+	return rm
+
+## 雨天把道路、地形、屋瓦和石材弄濕；0 是乾的
+func set_wet(v: float) -> void:
+	wet = v
+	for m in wet_shaders:
+		m.set_shader_parameter("wet", v)
+	for e in wet_std:
+		e[0].roughness = lerpf(e[1], 0.42, v)
+		e[0].albedo_color = (e[2] as Color).lerp((e[2] as Color) * 0.72, v)
+
 func _tune_kingdom_materials(root: Node) -> void:
 	for n in root.find_children("*", "MeshInstance3D", true, false):
 		var mi := n as MeshInstance3D
@@ -174,6 +216,11 @@ func _tune_kingdom_materials(root: Node) -> void:
 				mn.noise = mf; mn.seamless = true; mn.width = 512; mn.height = 512
 				tm.set_shader_parameter("macro_tex", mn)
 				mi.mesh.surface_set_material(i, tm)
+				wet_shaders.append(tm)
+			elif m.resource_name.begins_with("Cobble") or m.resource_name.begins_with("Dirt"):
+				mi.mesh.surface_set_material(i, _wet_road(m))
+			elif m.resource_name.begins_with("Roof") or m.resource_name.begins_with("Stone"):
+				wet_std.append([m, m.roughness, m.albedo_color])
 			if m.resource_name == "Window":
 				m.emission_enabled = true
 				m.emission = Color("ffcf7a")
