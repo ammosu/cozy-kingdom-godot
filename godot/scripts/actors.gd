@@ -65,6 +65,13 @@ var fov_kick := 0.0
 var shake_t := 0.0
 var sfx: Node
 var hold_t := -1.0         # 截圖用：固定在某個揮劍時間點
+# 鏡頭距離：滾輪調整，拉到最近再滾一下進第一人稱，V 直接切換
+var cam_dist := 5.5        # 第三人稱的目標距離
+var cam_cur := 5.5         # 目前距離（平滑追 cam_dist，第一人稱時追 0）
+var first_person := false
+var eye_h := 1.2           # 第一人稱眼睛高度，建角色時從 head 骨頭算
+var body_hidden := false
+var body_meshes: Array = []
 
 # 示範時間軸：[開始秒, 前進量, 側向量, 跑步, 鏡頭 yaw]
 const DEMO_STEPS := [
@@ -100,6 +107,11 @@ const PLUNGE_FALL := 26.0    # 俯衝速度
 const PLUNGE_R := 2.6        # 落地的影響半徑
 const PLUNGE_MIN_H := 0.6    # 離地太近不能下劈，避免一跳就砸
 const SHEATHE_AFTER := 2.5
+const CAM_MIN := 2.0
+const CAM_MAX := 9.0
+const CAM_STEP := 0.8
+const ASSIST_R := 4.0                 # 出招輕度瞄準：這個距離內的骷髏
+const ASSIST_ANG := 0.785398          # 跟出招方向夾角在這之內才修正
 const PUSH_R := 0.75        # 玩家和村民的軟碰撞半徑（兩人圓心距）
 const SWORD := "res://assets/chars/sword.glb"
 
@@ -164,6 +176,11 @@ func _make_player() -> void:
 		sp = Vector3(float(env_p.get_slice(",", 0)), 0, float(env_p.get_slice(",", 1)))
 	player.global_position = Vector3(sp.x, _ground_y(sp.x, sp.z) + 0.1, sp.z)
 	_make_weapon()
+	var head := skeleton.find_bone("head")
+	if head >= 0:
+		eye_h = (skeleton.global_transform * skeleton.get_bone_global_rest(head)).origin.y - player.global_position.y + 0.08
+	for g in player_visual.find_children("*", "GeometryInstance3D", true, false):
+		body_meshes.append([g, g.cast_shadow])
 	yaw = 0.0  # 面向北（城門）
 
 	cam_pivot = Node3D.new()
@@ -236,7 +253,36 @@ func _show_sword(in_hand: bool) -> void:
 	sword_back.visible = not in_hand
 
 
-func _start_attack(swing: int) -> void:
+## 出招朝向：有按方向鍵就朝那個方向（以鏡頭為基準），沒按就維持目前面向；第一人稱一律朝鏡頭。
+## 前方 45 度、4 m 內有骷髏時，轉向最近的那隻
+func _attack_facing() -> float:
+	var face := player.rotation.y
+	if first_person:
+		face = yaw
+	else:
+		var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+		if input.length() > 0.2:
+			var d := Vector3(input.x, 0, input.y).rotated(Vector3.UP, yaw)
+			face = atan2(-d.x, -d.z)
+	var fwd := Vector3(-sin(face), 0.0, -cos(face))
+	var best_score := INF
+	for d in enemies:
+		var to: Vector3 = d.node.global_position - player.global_position
+		to.y = 0.0
+		var dist := to.length()
+		if dist > ASSIST_R or dist < 0.05:
+			continue
+		var ang := acos(clampf(fwd.dot(to / dist), -1.0, 1.0))
+		if ang > ASSIST_ANG:
+			continue
+		var score := dist + ang * 2.0
+		if score < best_score:
+			best_score = score
+			face = atan2(-to.x, -to.z)
+	return face
+
+
+func _start_attack(swing: int, face: float = NAN) -> void:
 	attacking = true
 	attack_t = 0.0
 	attack_swing = swing
@@ -246,8 +292,8 @@ func _start_attack(swing: int) -> void:
 	attack_queued = false
 	attack_rest = SHEATHE_AFTER
 	_show_sword(true)
-	# 朝鏡頭方向揮
-	player.rotation.y = yaw
+	# 沒指定方向（示範片、自我測試）就朝鏡頭方向揮
+	player.rotation.y = yaw if is_nan(face) else face
 
 
 func _update_attack(dt: float) -> void:
@@ -278,7 +324,7 @@ func _update_attack(dt: float) -> void:
 			attack_hit = true
 			_resolve_hit()
 		if attack_queued and attack_t > 0.62:
-			_start_attack((attack_swing + 1) % 3)
+			_start_attack((attack_swing + 1) % 3, _attack_facing())
 		elif attack_t >= 1.0:
 			attacking = false
 			pose.weight = 0.0
@@ -298,7 +344,7 @@ func _can_plunge() -> bool:
 	return get_world_3d().direct_space_state.intersect_ray(q).is_empty()
 
 
-func _start_plunge() -> void:
+func _start_plunge(face: float = NAN) -> void:
 	attacking = true
 	attack_t = 0.0
 	attack_swing = 3
@@ -310,7 +356,7 @@ func _start_plunge() -> void:
 	plunge = 1
 	plunge_t = 0.0
 	vel_y = PLUNGE_HOP
-	player.rotation.y = yaw
+	player.rotation.y = yaw if is_nan(face) else face
 	pose.swing = 3
 	_show_sword(true)
 
@@ -574,16 +620,30 @@ func _unhandled_input(e: InputEvent) -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED    # 視窗放開滑鼠後，點一下回到遊戲
 		elif not mounted:
 			if _can_plunge():
-				_start_plunge()
+				_start_plunge(_attack_facing())
 			elif plunge != 0:
 				pass
 			elif not attacking:
-				_start_attack(0)
+				_start_attack(0, _attack_facing())
 			elif attack_t > 0.3:
 				attack_queued = true
 	if e is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		yaw -= e.relative.x * 0.004
-		pitch = clamp(pitch - e.relative.y * 0.003, -1.2, 0.4)
+		pitch = clamp(pitch - e.relative.y * 0.003, -1.2, 1.2 if first_person else 0.4)
+	if e is InputEventMouseButton and e.pressed:
+		if e.button_index == MOUSE_BUTTON_WHEEL_UP:
+			if cam_dist <= CAM_MIN + 0.01:
+				_set_first_person(true)
+			else:
+				cam_dist = maxf(CAM_MIN, cam_dist - CAM_STEP)
+		elif e.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			if first_person:
+				cam_dist = CAM_MIN
+				_set_first_person(false)
+			else:
+				cam_dist = minf(CAM_MAX, cam_dist + CAM_STEP)
+	if e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_V:
+		_set_first_person(not first_person)
 	if e is InputEventKey and e.pressed and e.keycode == KEY_ESCAPE:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED else Input.MOUSE_MODE_CAPTURED
 	if e.is_action_pressed("mount"):
@@ -591,6 +651,22 @@ func _unhandled_input(e: InputEvent) -> void:
 
 
 # 鏡頭到正下方地面的距離（晃動幅度不能超過它）
+func _set_first_person(on: bool) -> void:
+	first_person = on
+	if not on:
+		pitch = minf(pitch, 0.4)
+
+
+## 第一人稱時身體只留影子，低頭還看得到自己的影子
+func _hide_body(hide: bool) -> void:
+	if hide == body_hidden:
+		return
+	body_hidden = hide
+	for b in body_meshes:
+		var g: GeometryInstance3D = b[0]
+		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if hide else b[1]
+
+
 func _camera_clearance() -> float:
 	var from := camera.global_position
 	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 3.0)
@@ -684,7 +760,9 @@ func _physics_process(dt: float) -> void:
 	player.move_and_slide()
 	_clamp_to_world()
 	var moved := Vector2(player.global_position.x - before.x, player.global_position.z - before.z).length()
-	if dir.length() > 0.05 and not attacking:
+	if first_person and not attacking:
+		player.rotation.y = lerp_angle(player.rotation.y, yaw, 1.0 - exp(-12.0 * dt))
+	elif dir.length() > 0.05 and not attacking:
 		var target := atan2(-dir.x, -dir.z)
 		player.rotation.y = lerp_angle(player.rotation.y, target, 1.0 - exp(-12.0 * dt))
 	# 依實際移動判斷（撞牆時不會原地跑）
@@ -692,9 +770,13 @@ func _physics_process(dt: float) -> void:
 	_update_player_anim(dir.length() > 0.05 and real_speed > 0.5, running)
 	_update_attack(dt)
 	_update_feedback(dt, moved, running)
-	cam_pivot.global_position = player.global_position + Vector3(0, 1.4 if not mounted else 3.0, 0)
+	cam_cur = lerpf(cam_cur, 0.0 if first_person else cam_dist, 1.0 - exp(-10.0 * dt))
+	var saddle := 1.45 if mounted else 0.0
+	var tp_h := 3.0 if mounted else 1.4
+	cam_pivot.global_position = player.global_position + Vector3(0, lerpf(eye_h + saddle, tp_h, clampf(cam_cur / CAM_MIN, 0.0, 1.0)), 0)
 	cam_pivot.rotation = Vector3(pitch, yaw, 0)
-	spring.spring_length = 5.5 if not mounted else 8.0
+	spring.spring_length = cam_cur + (2.5 if mounted else 0.0) * clampf(cam_cur / CAM_MIN, 0.0, 1.0)
+	_hide_body(cam_cur < 0.6)
 	_update_villagers(dt)
 	_update_elk(dt)
 	# 鏡頭晃動（平方衰減，小晃動幾乎察覺不到）
@@ -705,7 +787,7 @@ func _physics_process(dt: float) -> void:
 	fov_kick *= exp(-14.0 * dt)
 	camera.fov = 60.0 - fov_kick
 	# 鏡頭被擠近地面或牆時不晃，不然會晃進去
-	var room := smoothstep(0.35, 1.0, spring.get_hit_length() / spring.spring_length)
+	var room := 1.0 if spring.spring_length < 0.3 else smoothstep(0.35, 1.0, spring.get_hit_length() / spring.spring_length)
 	var total := (a + cam_kick.length()) * room
 	if total > 0.001:
 		room *= minf(1.0, maxf(_camera_clearance() - 0.3, 0.0) / total)

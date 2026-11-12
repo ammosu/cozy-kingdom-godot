@@ -12,9 +12,13 @@ KINGDOM=proc godot --path godot --windowed --resolution 1600x900   # 切回程�
 godot --headless --path godot --import                  # 新增或更換 glb 後要跑
 [REL=1] tools/shot.sh <名稱> "x,y,z" "x,y,z" [frames]   # 截圖到 shots/，REL=1 時 y 是離地高度
 tools/record.sh <名稱>                                  # 錄示範影片到 video/
+SELFTEST=1 godot --path godot --windowed --resolution 1600x900   # 自我測試，最後一行印 fails=N
 ```
 
-- 這個專案沒有自動測試，改動靠截圖驗證。截圖會短暫在桌面開視窗。
+- 自我測試（`godot/scripts/selftest.gd`）實際跑物理與遊戲邏輯：門洞、撞牆、連擊、小光靈、天氣等，最後印 `SELFTEST done fails=N`，要 0 才算過。畫面效果仍靠截圖驗證。截圖、錄影、自我測試都會短暫在桌面開視窗。
+- 常用環境變數：`FOG=0..3` 指定天氣（3 是雨天）、`WISP=0` 關小光靈、`KINGDOM=proc` 程序化王國、`OLD_GRASS=1` 舊草。
+- 錄影：`REEL=1` 錄分段展示版（`demo_reel.gd` 的 `reel`），`REEL=interact`、`REEL=wisp` 是互動與小光靈的測試片。用 `tools/contact.sh video/x.mp4 1.0` 出縮圖總表檢查。
+- 操作：WASD、Shift 跑、Space 跳、左鍵攻擊（空中是下劈；朝方向鍵方向出招，沒按維持面向，前方 45°、4 m 內有骷髏會自動轉向）、滾輪縮放鏡頭（拉到最近再滾進第一人稱）、V 切第一人稱、R 麋鹿、F 切天氣、Esc 放開滑鼠。
 - 看效能要給 900 幀，前面幾百幀還在編譯 shader，數字會偏低（曾量到 51 fps，實際 146）。
 - 城外地勢比城內高，鏡頭要貼近地面時用 `REL=1`，不然會拍到地底。
 
@@ -27,6 +31,8 @@ tools/record.sh <名稱>                                  # 錄示範影片到 v
 | 王國底圖 | `blender/gen_kingdom.py`（`--hy 1` 是不含建築的版本） | `godot/assets/kingdom_hy.glb`＋`kingdom_hy_layout.json` |
 | 樹與灌木 | `blender/gen_trees.py` | `godot/assets/nature/` |
 | 草花貼圖 | `tools/codex_sprites.sh` → `tools/prep_sprites.py` | `godot/assets/sprites/` |
+| 音效 | `tools/gen_sfx.py [名稱]`（程序化合成），之後跑 `--import` | `godot/assets/sfx/` |
+| 敵人 | KayKit Skeletons（CC0，現成素材） | `godot/assets/chars/kaykit/` |
 
 `hy_asset.sh` 依賴本機其他專案：`~/git_project/ComfyUI`（要先開在 8188 port）、`~/git_project/Hunyuan3D-2.1`、`~/git_project/img2_3d/tools`。
 
@@ -37,6 +43,11 @@ tools/record.sh <名稱>                                  # 錄示範影片到 v
 - Blender 的物件名稱帶 `-col` 會產生碰撞。名稱以 `HiddenCol` 開頭的只留碰撞、畫面上隱藏，往下打的射線要跳過它們（見 `props.gd` 的 `_ground`）。
 - 城牆用哪個模型、一節多長，由 `props.gd` 開頭的 `WALL_PIECE`、`WALL_PIECE_LEN` 決定。
 - 要拿來重複拼接的模型做短一點、接近正方形，扁長物件在 Hunyuan 裡細節會糊掉。
+- 設計圖要粗獷大塊面：細窗格、斜撐、雕像、藤蔓在 Hunyuan 會破洞或融化。
+- 天空在 `shaders/sky_atmos.gdshader`。雲的時間走 `project.godot` 的 global uniform `cloud_t`，不要改用一般 uniform 或 `TIME`，否則環境光每幀重烘。
+- 雨天：`rain.gd` 的雨絲用高度場碰撞，雨絲範圍要在高度場內；路面變濕靠 `main.gd` 的 `set_wet`。Hunyuan 建築與道具目前不會變濕。
+- 小光靈（`wisp.gd`）是帶陰影的點光，約 1 ms；靠近白色骷髏時亮度別再加，會整隻染藍。
+- 素材授權記在 `CREDITS.md`，新增外部素材要同步補上；技術棧整理在 `TECH_STACK.md`。
 
 ## 規則
 
