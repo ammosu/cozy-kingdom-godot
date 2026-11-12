@@ -331,6 +331,8 @@ func run(actors: Node3D, nat: Node3D) -> void:
 	check("背後骷髏不修正", absf(angle_difference(a._attack_facing(), PI)) < 0.01)
 	# 16. 鏡頭：滾輪縮放、拉到底進第一人稱、V 切換
 	await tp(0, 68, 0.0)
+	a._set_first_person(false)   # 桌面上的視窗可能收到真的滾輪事件，先重設
+	a.cam_dist = 5.5
 	var wheel := func(up: bool) -> void:
 		var ev := InputEventMouseButton.new()
 		ev.button_index = MOUSE_BUTTON_WHEEL_UP if up else MOUSE_BUTTON_WHEEL_DOWN
@@ -345,6 +347,17 @@ func run(actors: Node3D, nat: Node3D) -> void:
 	var eye_y: float = a.camera.global_position.y - a.player.global_position.y
 	check("第一人稱在眼睛高度", eye_y > 0.9 and eye_y < 1.6, eye_y)
 	await snap("test_first_person")
+	a._start_attack(0, a._attack_facing())
+	var sword_seen := false
+	for i in 40:
+		await frames(1)
+		var cam: Camera3D = a.camera
+		if not sword_seen and a.sword_hand.visible and cam.is_position_in_frustum(a.sword_tip.global_position):
+			sword_seen = true
+			await snap("test_fp_swing")
+	var sword_mesh: GeometryInstance3D = a.sword_hand.find_children("*", "GeometryInstance3D", true, false)[0]
+	check("第一人稱揮劍看得到劍", sword_seen and sword_mesh.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
+	await frames(60)
 	wheel.call(false)
 	await frames(60)
 	check("滾回第三人稱", not a.first_person and absf(a.cam_cur - a.CAM_MIN) < 0.05 and not a.body_hidden, a.cam_cur)

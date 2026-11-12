@@ -180,7 +180,8 @@ func _make_player() -> void:
 	if head >= 0:
 		eye_h = (skeleton.global_transform * skeleton.get_bone_global_rest(head)).origin.y - player.global_position.y + 0.08
 	for g in player_visual.find_children("*", "GeometryInstance3D", true, false):
-		body_meshes.append([g, g.cast_shadow])
+		if not sword_hand.is_ancestor_of(g):   # 手上的劍第一人稱也要看得到
+			body_meshes.append([g, g.cast_shadow])
 	yaw = 0.0  # 面向北（城門）
 
 	cam_pivot = Node3D.new()
