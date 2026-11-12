@@ -4,7 +4,7 @@
 
 ![示範片段](docs/demo.gif)
 
-▶ [完整示範影片（70 秒，1600×900）](https://github.com/ammosu/cozy-kingdom-godot/releases/download/demo-v9/demo_v9.mp4)
+▶ [完整示範影片（70 秒，1600×900）](https://github.com/ammosu/cozy-kingdom-godot/releases/download/demo-v9/demo_v9_small.mp4)
 
 ## 內容
 
