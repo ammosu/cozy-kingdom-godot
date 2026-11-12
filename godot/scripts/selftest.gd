@@ -310,5 +310,55 @@ func run(actors: Node3D, nat: Node3D) -> void:
 	check("切回晴天雨停", not fog_n.rain.drops.emitting and fog_n.idx == 0, fog_n.idx)
 	check("雨聲停止", not fog_n.rain.audio.playing)
 	check("地面變乾", main_n.wet == 0.0 and sky_m.get_shader_parameter("storm") == 0.0)
+	# 15. 出招方向：跟方向鍵、沒按維持面向、前方有骷髏輕度轉向
+	await tp(0, 68, 0.0)
+	Input.action_press("move_right")
+	var face_r: float = a._attack_facing()
+	Input.action_release("move_right")
+	check("按右鍵往右砍", absf(angle_difference(face_r, -PI / 2.0)) < 0.01, face_r)
+	a.player.rotation.y = 1.0
+	check("沒按方向維持面向", absf(angle_difference(a._attack_facing(), 1.0)) < 0.01)
+	a._start_attack(0, a._attack_facing())
+	check("出招轉向指定方向", absf(angle_difference(a.player.rotation.y, 1.0)) < 0.01, a.player.rotation.y)
+	while a.attacking:
+		await get_tree().physics_frame
+	ep = en_n.global_position
+	await tp(ep.x + 0.8, ep.z + 2.2, 0.0)
+	var to_en: Vector3 = en_n.global_position - a.player.global_position
+	var aim: float = a._attack_facing()
+	check("前方骷髏自動修正", absf(angle_difference(aim, atan2(-to_en.x, -to_en.z))) < 0.01, aim)
+	a.player.rotation.y = PI
+	check("背後骷髏不修正", absf(angle_difference(a._attack_facing(), PI)) < 0.01)
+	# 16. 鏡頭：滾輪縮放、拉到底進第一人稱、V 切換
+	await tp(0, 68, 0.0)
+	var wheel := func(up: bool) -> void:
+		var ev := InputEventMouseButton.new()
+		ev.button_index = MOUSE_BUTTON_WHEEL_UP if up else MOUSE_BUTTON_WHEEL_DOWN
+		ev.pressed = true
+		a._unhandled_input(ev)
+	for i in 5:
+		wheel.call(true)
+	check("滾輪拉近到最近", absf(a.cam_dist - a.CAM_MIN) < 0.01 and not a.first_person, a.cam_dist)
+	wheel.call(true)
+	await frames(60)
+	check("再滾進第一人稱", a.first_person and a.cam_cur < 0.05 and a.body_hidden, a.cam_cur)
+	var eye_y: float = a.camera.global_position.y - a.player.global_position.y
+	check("第一人稱在眼睛高度", eye_y > 0.9 and eye_y < 1.6, eye_y)
+	await snap("test_first_person")
+	wheel.call(false)
+	await frames(60)
+	check("滾回第三人稱", not a.first_person and absf(a.cam_cur - a.CAM_MIN) < 0.05 and not a.body_hidden, a.cam_cur)
+	for i in 12:
+		wheel.call(false)
+	check("滾輪拉遠有上限", absf(a.cam_dist - a.CAM_MAX) < 0.01, a.cam_dist)
+	var vk := InputEventKey.new()
+	vk.keycode = KEY_V
+	vk.pressed = true
+	a._unhandled_input(vk)
+	check("V 切第一人稱", a.first_person)
+	a._unhandled_input(vk)
+	check("V 切回第三人稱", not a.first_person)
+	a.cam_dist = 5.5
+	await frames(60)
 	print("SELFTEST done fails=", fails)
 	get_tree().quit()
